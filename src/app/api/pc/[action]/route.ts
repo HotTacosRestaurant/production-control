@@ -1,34 +1,94 @@
 import {NextRequest, NextResponse} from 'next/server';
 import {FieldValue} from 'firebase-admin/firestore';
 import {isPCUnit} from '@/lib/pc-units';
-import {db, requireLocalDevelopment, safeSite, validSites, validDate, operationalToday, text, stamp, newId, findEmployee, audit, type Site} from '@/lib/pc-server';
+import {buildManagementData} from '@/lib/pc-kpis-server';
+import {
+  audit,
+  createDeviceToken,
+  db,
+  deviceCookieConfig,
+  enforceDeviceSite,
+  findEmployee,
+  getDeviceStatus,
+  newId,
+  operationalToday,
+  requireDeviceAuthorization,
+  requireSameOrigin,
+  requireSuperAdmin,
+  safeSite,
+  stamp,
+  text,
+  validDate,
+  validSites,
+  verifyDeviceSetupKey,
+  type Site,
+} from '@/lib/pc-server';
 
 export const runtime='nodejs';
 type Context={params:Promise<{action:string}>};
 type CountLine={productId:string;bagCount:number};
 const number=(v:unknown)=>typeof v==='number'?v:Number(v);
+
 function respond(error:unknown){
  const message=error instanceof Error?error.message:'SERVER_ERROR';
- const status=message==='AUTH_NOT_CONFIGURED'?403:message==='FORBIDDEN'?403:message==='CONFLICT'?409:message.startsWith('Missing server')?503:message==='SERVER_ERROR'?500:400;
+ const status=message==='DEVICE_NOT_AUTHORIZED'||message==='ADMIN_AUTH_REQUIRED'?401:message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'||message==='INVALID_DEVICE_KEY'||message==='FORBIDDEN'?403:message==='CONFLICT'?409:message.startsWith('Missing server')?503:message==='SERVER_ERROR'?500:400;
  console.error('PC API:',message);
  return NextResponse.json({error:message},{status});
 }
 
+type ScopedRow = Record<string, unknown> & {id:string};
+
+function scopedDocs(snap:FirebaseFirestore.QuerySnapshot,siteId:Site|null,kind:'siteId'|'siteIds'):ScopedRow[]{
+ const rows:ScopedRow[]=snap.docs.map(d=>({...(d.data() as Record<string, unknown>),id:d.id}));
+ if(!siteId)return rows;
+ return rows.filter(row=>kind==='siteId'?row.siteId===siteId:Array.isArray(row.siteIds)&&row.siteIds.includes(siteId));
+}
+
 export async function GET(req:NextRequest,context:Context){try{
- requireLocalDevelopment(req);
  const {action}=await context.params;
+ if(action==='device-status')return NextResponse.json(getDeviceStatus(req));
+ if(action==='management'){
+  await requireSuperAdmin(req);
+  return NextResponse.json(await buildManagementData(),{headers:{'Cache-Control':'no-store'}});
+ }
  if(action!=='snapshot'&&action!=='public')throw new Error('NOT_FOUND');
+ const access=requireDeviceAuthorization(req);
  const store=db();
  const [pr,pe,co,ba,ac,inputs]=await Promise.all([
-  store.collection('pc_products').get(),store.collection('pc_staff').get(),store.collection('pc_counts').orderBy('capturedAt','desc').limit(120).get(),store.collection('pc_batches').orderBy('createdAt','desc').limit(100).get(),store.collection('pc_activities').get(),store.collection('pc_inputs').get()
+  store.collection('pc_products').get(),
+  store.collection('pc_staff').get(),
+  store.collection('pc_counts').get(),
+  store.collection('pc_batches').get(),
+  store.collection('pc_activities').get(),
+  store.collection('pc_inputs').get(),
  ]);
- const docs=(snap:FirebaseFirestore.QuerySnapshot)=>snap.docs.map(d=>({...d.data(),id:d.id}));
- return NextResponse.json({products:docs(pr),staff:docs(pe),counts:docs(co),batches:docs(ba),activities:docs(ac),inputs:docs(inputs)});
+ const products=scopedDocs(pr,access.siteId,'siteIds');
+ const staff=scopedDocs(pe,access.siteId,'siteIds');
+ const counts=scopedDocs(co,access.siteId,'siteId').sort((a,b)=>String(b.operationalDate??'').localeCompare(String(a.operationalDate??''))).slice(0,120);
+ const batches=scopedDocs(ba,access.siteId,'siteId').sort((a,b)=>String(b.operationalDate??'').localeCompare(String(a.operationalDate??''))).slice(0,100);
+ const activities=scopedDocs(ac,access.siteId,'siteId');
+ const inputRows=scopedDocs(inputs,access.siteId,'siteId');
+ return NextResponse.json({products,staff,counts,batches,activities,inputs:inputRows},{headers:{'Cache-Control':'no-store'}});
 }catch(e){return respond(e);}}
 
 export async function POST(req:NextRequest,context:Context){try{
- requireLocalDevelopment(req);
  const {action}=await context.params;
+ if(action==='device-authorize'){
+  requireSameOrigin(req);
+  const payload=await req.json() as Record<string,unknown>;
+  verifyDeviceSetupKey(payload.setupKey);
+  if(!safeSite(payload.siteId))throw new Error('INVALID_SITE');
+  const response=NextResponse.json({ok:true,siteId:payload.siteId});
+  response.cookies.set({...deviceCookieConfig(),value:createDeviceToken(payload.siteId)});
+  return response;
+ }
+ if(action==='device-signout'){
+  requireSameOrigin(req);
+  const response=NextResponse.json({ok:true});
+  response.cookies.set({...deviceCookieConfig(),value:'',maxAge:0});
+  return response;
+ }
+ const access=requireDeviceAuthorization(req);
  const payload=await req.json() as Record<string,unknown>;
  const store=db();
  if(action==='catalog'){
@@ -36,7 +96,8 @@ export async function POST(req:NextRequest,context:Context){try{
   if(name.length<2||!validSites(sites))throw new Error('INVALID_CATALOG');
   const active=payload.active!==false;
   const branch=payload.siteId;
-  if(!safeSite(branch)||!sites.includes(branch))throw new Error('INVALID_SITE');
+  enforceDeviceSite(access,branch);
+  if(!sites.includes(branch))throw new Error('INVALID_SITE');
   const existingId=typeof payload.id==='string'&&/^[\w-]{5,80}$/.test(payload.id)?payload.id:null;
   if(!existingId){if(sites.length!==1||sites[0]!==branch)throw new Error('INVALID_SITE');}
   else {
@@ -65,8 +126,9 @@ export async function POST(req:NextRequest,context:Context){try{
  }
  if(action==='count'){
   const site=payload.siteId;
+  enforceDeviceSite(access,site);
   const date=payload.operationalDate, period=payload.period;
-  if(!safeSite(site)||!validDate(date)||date>operationalToday()||!['opening','closing'].includes(String(period)))throw new Error('INVALID_COUNT');
+  if(!validDate(date)||date>operationalToday()||!['opening','closing'].includes(String(period)))throw new Error('INVALID_COUNT');
   const starter=await findEmployee(payload.startedById,site);
   const signer=await findEmployee(payload.signedById,site);
   const differs=starter.id!==signer.id;
@@ -94,6 +156,7 @@ export async function POST(req:NextRequest,context:Context){try{
   const ref=store.collection('pc_counts').doc(id);
   const before=await ref.get(),existing=before.data();
   if(!existing||!safeSite(existing.siteId)||!Array.isArray(existing.lines))throw new Error('INVALID_COUNT');
+  if(access.siteId&&access.siteId!==existing.siteId)throw new Error('FORBIDDEN');
   const employee=await findEmployee(payload.employeeId,existing.siteId);
   const rows=payload.lines;
   if(!Array.isArray(rows)||rows.length!==existing.lines.length)throw new Error('INVALID_COUNT');
@@ -120,6 +183,7 @@ export async function POST(req:NextRequest,context:Context){try{
   if(!id||reason.length<5||!Number.isFinite(qty)||qty<=0||qty>100000||!isPCUnit(unit))throw new Error('INVALID_CORRECTION');
   const ref=store.collection('pc_inputs').doc(id),before=await ref.get(),old=before.data();
   if(!old||!safeSite(old.siteId))throw new Error('INVALID_INPUT');
+  if(access.siteId&&access.siteId!==old.siteId)throw new Error('FORBIDDEN');
   const employee=await findEmployee(payload.employeeId,old.siteId);
   if(old.quantity===qty&&old.unit===unit)throw new Error('NO_CHANGES');
   const revision=ref.collection('revisions').doc();
@@ -137,6 +201,7 @@ export async function POST(req:NextRequest,context:Context){try{
   if(!id||reason.length<5||!Number.isSafeInteger(bags)||bags<0||bags>100000)throw new Error('INVALID_CORRECTION');
   const ref=store.collection('pc_batches').doc(id),before=await ref.get(),old=before.data();
   if(!old||old.status!=='completed'||!safeSite(old.siteId)||!Number.isFinite(old.bagWeightKgSnapshot))throw new Error('INVALID_BATCH');
+  if(access.siteId&&access.siteId!==old.siteId)throw new Error('FORBIDDEN');
   const employee=await findEmployee(payload.employeeId,old.siteId);
   if(old.bagCount===bags)throw new Error('NO_CHANGES');
   const revision=ref.collection('revisions').doc();
@@ -150,8 +215,10 @@ export async function POST(req:NextRequest,context:Context){try{
   return NextResponse.json({ok:true});
  }
  if(action==='batch'){
-  const site=payload.siteId, date=payload.operationalDate, productId=text(payload.productId,80);
-  if(!safeSite(site)||!validDate(date)||date>operationalToday())throw new Error('INVALID_BATCH');
+  const site=payload.siteId;
+  enforceDeviceSite(access,site);
+  const date=payload.operationalDate, productId=text(payload.productId,80);
+  if(!validDate(date)||date>operationalToday())throw new Error('INVALID_BATCH');
   const employee=await findEmployee(payload.employeeId,site);
   const product=await store.collection('pc_products').doc(productId).get();const p=product.data();
   if(!p||!p.active||p.kind!=='finished'||!validSites(p.siteIds)||!p.siteIds.includes(site))throw new Error('INVALID_PRODUCT');
@@ -165,6 +232,7 @@ export async function POST(req:NextRequest,context:Context){try{
   const snap=await ref.get(),b=snap.data();
   if(!b||b.status!=='active'||!safeSite(b.siteId))throw new Error('INVALID_BATCH');
   const site=b.siteId as Site;
+  if(access.siteId&&access.siteId!==site)throw new Error('FORBIDDEN');
   const employee=await findEmployee(payload.employeeId,site);
   if(action==='start'||action==='pause'){
    const activity=store.collection('pc_activities').doc(`${batchId}_${employee.id}`);
