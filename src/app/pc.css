@@ -5,7 +5,7 @@
 
 .ux-input-preview{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px 12px;padding:13px;background:#e8f4fb;color:#205579;border:1px solid #b8d7eb;border-radius:11px;margin-top:12px}.ux-input-preview span{font-size:13px}
 /* Phase: explicit branch confirmation and readable count history */
-.ux-branch-label{display:flex;align-items:center;gap:8px;padding:11px 15px;min-height:43px;border:1px solid #8bb6d0;border-radius:12px;background:#e4f2fc;color:#103c5d;font-size:15px;font-weight:850;white-space:nowrap}
+.ux-branch-label{display:block;padding:11px 15px;min-height:43px;border:1px solid #8bb6d0;border-radius:12px;background:#e4f2fc;color:#103c5d;font-size:15px;font-weight:850;white-space:nowrap;cursor:pointer}
 .ux-branch-label span{color:#476b87;font-size:13px}
 .ux-location-gate{z-index:80;background:rgba(10,32,51,.83)}
 .ux-location-dialog{width:min(590px,100%);padding:28px;gap:18px}

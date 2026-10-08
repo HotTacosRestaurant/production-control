@@ -1,5 +1,5 @@
 import 'server-only';
-import {createHmac, randomUUID, timingSafeEqual} from 'node:crypto';
+import {randomUUID} from 'node:crypto';
 import {cert, getApps, initializeApp} from 'firebase-admin/app';
 import {getAuth} from 'firebase-admin/auth';
 import {FieldValue, getFirestore, type Firestore} from 'firebase-admin/firestore';
@@ -14,9 +14,6 @@ export const validDate = (value: unknown): value is string => typeof value === '
 export const operationalToday = () => new Intl.DateTimeFormat('en-CA', {timeZone:'America/Toronto', year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date());
 export const stamp = () => FieldValue.serverTimestamp();
 export const newId = () => randomUUID();
-
-const DEVICE_COOKIE = 'pc_station';
-const DEVICE_MAX_AGE_SECONDS = 60 * 60 * 24 * 180;
 
 function required(name:string):string {
   const value=process.env[name];
@@ -33,93 +30,9 @@ export function db():Firestore {
   return getFirestore();
 }
 
-function isLocalDevelopment(request: Request): boolean {
-  const host = new URL(request.url).hostname;
-  return process.env.NODE_ENV === 'development' && (host === 'localhost' || host === '127.0.0.1');
-}
-
 export function requireSameOrigin(request: Request): void {
   const origin=request.headers.get('origin');
   if(origin && new URL(origin).origin !== new URL(request.url).origin)throw new Error('FORBIDDEN');
-}
-
-function cookieValue(request: Request, name: string): string {
-  const raw=request.headers.get('cookie')??'';
-  for(const item of raw.split(';')){
-    const [key,...rest]=item.trim().split('=');
-    if(key===name)return decodeURIComponent(rest.join('='));
-  }
-  return '';
-}
-
-function secureEqual(a:string,b:string):boolean {
-  const left=Buffer.from(a);
-  const right=Buffer.from(b);
-  return left.length===right.length && timingSafeEqual(left,right);
-}
-
-function deviceSignature(payload:string):string {
-  return createHmac('sha256',required('PC_DEVICE_SIGNING_KEY')).update(payload).digest('base64url');
-}
-
-export function createDeviceToken(siteId:Site):string {
-  const exp=Math.floor(Date.now()/1000)+DEVICE_MAX_AGE_SECONDS;
-  const payload=Buffer.from(JSON.stringify({siteId,exp})).toString('base64url');
-  return `${payload}.${deviceSignature(payload)}`;
-}
-
-function verifyDeviceToken(token:string):{siteId:Site;exp:number}|null {
-  const [payload,signature]=token.split('.');
-  if(!payload||!signature)return null;
-  const expected=deviceSignature(payload);
-  if(!secureEqual(signature,expected))return null;
-  try{
-    const parsed=JSON.parse(Buffer.from(payload,'base64url').toString('utf8')) as {siteId?:unknown;exp?:unknown};
-    if(!safeSite(parsed.siteId)||typeof parsed.exp!=='number'||parsed.exp<=Math.floor(Date.now()/1000))return null;
-    return {siteId:parsed.siteId,exp:parsed.exp};
-  }catch{return null;}
-}
-
-export function deviceCookieConfig() {
-  return {
-    name: DEVICE_COOKIE,
-    maxAge: DEVICE_MAX_AGE_SECONDS,
-    httpOnly: true,
-    sameSite: 'lax' as const,
-    secure: process.env.NODE_ENV === 'production',
-    path: '/',
-  };
-}
-
-export function verifyDeviceSetupKey(value:unknown):void {
-  const supplied=typeof value==='string'?value:'';
-  const expected=required('PC_DEVICE_SETUP_KEY');
-  if(!supplied||!secureEqual(supplied,expected))throw new Error('INVALID_DEVICE_KEY');
-}
-
-export type DeviceAccess={siteId:Site|null;development:boolean};
-
-export function requireDeviceAuthorization(request:Request):DeviceAccess {
-  requireSameOrigin(request);
-  if(isLocalDevelopment(request))return {siteId:null,development:true};
-  const token=cookieValue(request,DEVICE_COOKIE);
-  const parsed=token?verifyDeviceToken(token):null;
-  if(!parsed)throw new Error('DEVICE_NOT_AUTHORIZED');
-  return {siteId:parsed.siteId,development:false};
-}
-
-export function getDeviceStatus(request:Request):{authorized:boolean;siteId:Site|null;development:boolean} {
-  try{
-    const access=requireDeviceAuthorization(request);
-    return {authorized:true,siteId:access.siteId,development:access.development};
-  }catch{
-    return {authorized:false,siteId:null,development:false};
-  }
-}
-
-export function enforceDeviceSite(access:DeviceAccess,site:unknown):asserts site is Site {
-  if(!safeSite(site))throw new Error('INVALID_SITE');
-  if(access.siteId && access.siteId!==site)throw new Error('FORBIDDEN');
 }
 
 export async function requireSuperAdmin(request:Request):Promise<{uid:string;email:string}> {
