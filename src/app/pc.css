@@ -79,3 +79,26 @@
 .ux-movement{margin-top:24px}.ux-movement .ux-quick-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:13px;padding-top:12px}.ux-movement .ux-quick-form label{min-width:0}.ux-movement input,.ux-movement select{max-width:100%}
 
 .forecast-event-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px;justify-content:space-between;border:1px solid #d4e3d8;background:#fff;padding:8px 12px;border-radius:9px;font-size:12px;margin:6px 0}
+
+/* Connection recovery: show a clear retry action without interrupting kitchen workflows. */
+.ux-message{gap:12px;flex-wrap:wrap;overflow-wrap:anywhere}
+.ux-message>span{flex:1;min-width:min(100%,220px)}
+.ux-message-actions{display:flex;align-items:center;gap:8px;margin-left:auto}
+.ux-message-actions .ux-retry{font-weight:750;font-size:13px;border:1px solid #95bcd3;border-radius:9px;padding:9px 12px;min-height:42px;background:#fff;color:#14466c}
+.ux-message-actions button:last-child{min-width:40px;min-height:40px}
+@media(max-width:540px){.ux-message-actions{width:100%;justify-content:space-between}}
+
+/* Small, audit-friendly timer correction without altering timer controls. */
+.ux-timer-correct{display:block;margin:0 auto 10px;min-height:40px}
+.ux-batch-summary{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.ux-timer-modal{max-width:590px}
+.ux-timer-interval{border:1px solid #dae5ed;padding:12px;border-radius:12px;display:grid;gap:10px}
+.ux-timer-timefields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+
+@media(max-width:540px){.ux-timer-timefields{grid-template-columns:1fr}.ux-batch-summary{align-items:flex-start}}
+
+/* Ingredientes registrados por lote: listado simple sin métricas artificiales. */
+.ux-batch-input-list,.forecast-ingredient-list{list-style:none;padding:0;margin:8px 0;display:grid;gap:5px}
+.ux-batch-input-list li{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #e7edf2;padding:6px 0}
+.forecast-ingredient-list li{padding:5px 0;border-bottom:1px solid #e7edf2}
+.forecast-actual-breakdown{display:block;color:#5d7184;font-size:12px;margin-top:4px}

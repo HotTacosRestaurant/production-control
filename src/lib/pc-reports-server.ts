@@ -6,7 +6,7 @@ type AnyRow=Record<string,unknown>&{id:string};
 const text=(v:unknown)=>typeof v==='string'?v:'';
 const n=(v:unknown)=>Number.isFinite(Number(v))?Number(v):0;
 const round=(v:number)=>Math.round(v*1000)/1000;
-export type ReportPayload={scenario:ReturnType<typeof buildScenario>;product:ProductConfig;source:{counts:AnyRow[];batches:AnyRow[];inputs:AnyRow[];activities:AnyRow[];movements:AnyRow[]};metrics:{outputKg:number;laborHours:number;kgPerLaborHour:number|null;ingredientEntries:number;completedBatches:number;rawIngredientKg:number|null;actualYieldPct:number|null;expectedYieldPct:number|null}};
+export type ReportPayload={scenario:ReturnType<typeof buildScenario>;product:ProductConfig;source:{counts:AnyRow[];batches:AnyRow[];inputs:AnyRow[];activities:AnyRow[];movements:AnyRow[]};metrics:{outputKg:number;laborHours:number;kgPerLaborHour:number|null;ingredientEntries:number;completedBatches:number}};
 export async function loadReport(config:ScenarioConfig):Promise<ReportPayload>{
  const store=db();
  const from=[config.historyFrom,config.baseFrom].sort()[0],to=[config.historyTo,config.baseTo].sort().at(-1)!;
@@ -19,7 +19,7 @@ export async function loadReport(config:ScenarioConfig):Promise<ReportPayload>{
  ]);
  const pdata=products.data();
  if(!pdata||pdata.kind!=='finished'||!Array.isArray(pdata.siteIds)||!pdata.siteIds.includes(config.siteId))throw new Error('INVALID_PRODUCT');
- const product:ProductConfig={id:products.id,name:String(pdata.name),bagWeightKg:n(pdata.bagWeightKg),targetDays:n(pdata.targetDays)||10,minDays:pdata.minDays===undefined?3:n(pdata.minDays),leadDays:n(pdata.leadDays),supplierLeadDays:n(pdata.supplierLeadDays),wholeUnitRawKg:n(pdata.wholeUnitRawKg),expectedYieldPct:n(pdata.expectedYieldPct)||100,primaryIngredientId:typeof pdata.primaryIngredientId==='string'?pdata.primaryIngredientId:undefined};
+ const product:ProductConfig={id:products.id,name:String(pdata.name),bagWeightKg:n(pdata.bagWeightKg),targetDays:n(pdata.targetDays)||10,minDays:pdata.minDays===undefined?3:n(pdata.minDays)};
  // Firestore DocumentData is untyped; preserve the row's dynamic fields and an explicit ID.
  const convert=(s:FirebaseFirestore.QuerySnapshot):AnyRow[]=>s.docs.map(d=>({...d.data(),id:d.id} as AnyRow));
  const counts=convert(countsSnap).filter(v=>v.siteId===config.siteId);
@@ -49,28 +49,12 @@ export async function loadReport(config:ScenarioConfig):Promise<ReportPayload>{
   const row=stats.get(key)??{name,unit,quantity:0};row.quantity+=n(input.quantity);stats.set(key,row);
  }
  const ratios=outputKg>0?[...stats.values()].map(v=>({...v,quantity:v.quantity/outputKg})):[];
- let rawIngredientKg=0,measuredPrimary=false,invalidUnit=false;const measuredBatchIds=new Set<string>();
- for(const input of reportingInputs.filter(i=>completedIds.has(text(i.batchId))&&text(i.ingredientId)===product.primaryIngredientId)){
-  const qty=n(input.quantity),unit=text(input.unit);
-  if(unit==='kg')rawIngredientKg+=qty;
-  else if(unit==='g')rawIngredientKg+=qty/1000;
-  else if(unit==='lb')rawIngredientKg+=qty*0.45359237;
-  else invalidUnit=true;
-  measuredPrimary=true;measuredBatchIds.add(text(input.batchId));
- }
- const completeInputCoverage=completed.length>0&&completed.every(b=>measuredBatchIds.has(b.id));
- const verifiedRaw=measuredPrimary&&completeInputCoverage&&!invalidUnit&&rawIngredientKg>0?round(rawIngredientKg):null;
- const actualYieldPct=verifiedRaw&&outputKg>0?round(outputKg/verifiedRaw*100):null;
  const scenario=buildScenario(historical,product,config,{laborHoursPerKg:rate,ingredientsPerKg:ratios});
- if(!product.primaryIngredientId)scenario.alerts.push('Selecciona la materia prima principal en Catálogos para calcular el rendimiento real.');
- if(product.primaryIngredientId&&!completeInputCoverage)scenario.alerts.push('Rendimiento no disponible: faltan registros de materia prima principal en uno o más lotes terminados.');
- if(invalidUnit)scenario.alerts.push('Rendimiento no disponible: materia prima principal registrada en unidades no convertibles a kg.');
- if(ratios.length)scenario.alerts.push('Insumos proyectados con proporciones históricas, no con una receta estandarizada. Confirmar con cocina y compras.');
- if(!ratios.length)scenario.alerts.push('Sin histórico suficiente de ingredientes: compras requiere capturar una receta cuantificada antes de emitir una orden.');
- return {scenario,product,source:{counts,batches:reportBatches,inputs:reportingInputs,activities:reportingActivities,movements:movements.filter(v=>inReportingRange(v.operationalDate))},metrics:{outputKg,laborHours:round(laborHours),kgPerLaborHour:laborHours>0?round(outputKg/laborHours):null,ingredientEntries:reportingInputs.length,completedBatches:completed.length,rawIngredientKg:verifiedRaw,actualYieldPct,expectedYieldPct:product.expectedYieldPct??null}};
+ if(ratios.length)scenario.alerts.push('Ingredientes estimados con base en lotes reales; validar disponibilidad con Cocina y Compras.');
+ return {scenario,product,source:{counts,batches:reportBatches,inputs:reportingInputs,activities:reportingActivities,movements:movements.filter(v=>inReportingRange(v.operationalDate))},metrics:{outputKg,laborHours:round(laborHours),kgPerLaborHour:laborHours>0?round(outputKg/laborHours):null,ingredientEntries:reportingInputs.length,completedBatches:completed.length}};
 }
 export function demoReport(config:ScenarioConfig):ReportPayload{
- const product:ProductConfig={id:'protein-01',name:'Proteína P-01 (demostración)',bagWeightKg:5,targetDays:10,minDays:3,leadDays:1,supplierLeadDays:2,wholeUnitRawKg:30,expectedYieldPct:70};
+ const product:ProductConfig={id:'protein-01',name:'Proteína P-01 (demostración)',bagWeightKg:5,targetDays:10,minDays:3};
  const counts:CountRecord[]=[];const batches:BatchRecord[]=[];
  let stock=48;
  const first=[config.baseFrom,config.historyFrom].sort()[0];const last=[config.baseTo,config.historyTo].sort().at(-1)!;
@@ -85,5 +69,5 @@ export function demoReport(config:ScenarioConfig):ReportPayload{
  const observed=historical.filter(d=>d.date>=config.historyFrom&&d.date<=config.historyTo);
  const demoOutput=round(observed.reduce((total,d)=>total+d.productionKg,0));
  const demoCount=observed.filter(d=>d.productionKg>0).length;
- return {scenario:buildScenario(historical,product,config,{laborHoursPerKg:.25,ingredientsPerKg:[{name:'Ingrediente A',quantity:1.1,unit:'kg'},{name:'Ingrediente B',quantity:0.03,unit:'kg'}]}),product,source:{counts:[],batches:[],inputs:[],activities:[],movements:[]},metrics:{outputKg:demoOutput,laborHours:round(demoOutput*.25),kgPerLaborHour:demoOutput?4:null,ingredientEntries:demoCount*3,completedBatches:demoCount,rawIngredientKg:demoOutput?round(demoOutput/.7):null,actualYieldPct:demoOutput?70:null,expectedYieldPct:70}};
+ return {scenario:buildScenario(historical,product,config,{laborHoursPerKg:.25,ingredientsPerKg:[{name:'Ingrediente A',quantity:1.1,unit:'kg'},{name:'Ingrediente B',quantity:0.03,unit:'kg'}]}),product,source:{counts:[],batches:[],inputs:[],activities:[],movements:[]},metrics:{outputKg:demoOutput,laborHours:round(demoOutput*.25),kgPerLaborHour:demoOutput?4:null,ingredientEntries:demoCount*3,completedBatches:demoCount}};
 }

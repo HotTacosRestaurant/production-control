@@ -9,7 +9,7 @@ import {
   findEmployee,
   newId,
   operationalToday,
-  requireOperatorAccess,
+  requireSameOrigin,
   requireSuperAdmin,
   safeSite,
   stamp,
@@ -26,7 +26,7 @@ const number=(v:unknown)=>typeof v==='number'?v:Number(v);
 
 function respond(error:unknown){
  const message=error instanceof Error?error.message:'SERVER_ERROR';
- const status=message==='ADMIN_AUTH_REQUIRED'||message==='OPERATIONS_PIN_REQUIRED'?401:message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'||message==='FORBIDDEN'?403:message==='CONFLICT'?409:message.startsWith('Missing server')||message==='OPERATIONS_PIN_NOT_CONFIGURED'?503:message==='SERVER_ERROR'?500:400;
+ const status=message==='ADMIN_AUTH_REQUIRED'?401:message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'||message==='FORBIDDEN'?403:message==='CONFLICT'?409:message.startsWith('Missing server')?503:message==='SERVER_ERROR'?500:400;
  console.error('PC API:',message);
  return NextResponse.json({error:message},{status});
 }
@@ -48,7 +48,6 @@ export async function GET(req:NextRequest,context:Context){try{
   return NextResponse.json(await buildManagementData({from,to}),{headers:{'Cache-Control':'no-store'}});
  }
  if(action!=='snapshot')throw new Error('NOT_FOUND');
- requireOperatorAccess(req);
  const store=db();
  const [pr,pe,co,ba,ac,inputs]=await Promise.all([
   store.collection('pc_products').get(),
@@ -71,7 +70,7 @@ export async function GET(req:NextRequest,context:Context){try{
 
 export async function POST(req:NextRequest,context:Context){try{
  const {action}=await context.params;
- requireOperatorAccess(req);
+  requireSameOrigin(req);
  const payload=await req.json() as Record<string,unknown>;
  const store=db();
  if(action==='catalog'){
@@ -102,22 +101,18 @@ export async function POST(req:NextRequest,context:Context){try{
    if(!['finished','ingredient'].includes(String(productKind))||(productKind==='finished'&&(!Number.isFinite(weight)||weight<=0||weight>1000)))throw new Error('INVALID_PRODUCT');
    const id=typeof payload.id==='string'&&/^[\w-]{5,80}$/.test(payload.id)?payload.id:newId();
    const process=payload.preparationProcess;
-   const primaryIngredientId=text(payload.primaryIngredientId,80);
-   if(primaryIngredientId){const primary=await store.collection('pc_products').doc(primaryIngredientId).get();const value=primary.data();if(!value||value.kind!=='ingredient'||!validSites(value.siteIds)||!value.siteIds.includes(branch))throw new Error('INVALID_PRIMARY_INGREDIENT');}
-   const targetDays=number(payload.targetDays??10),minDays=number(payload.minDays??3),leadDays=number(payload.leadDays??0),supplierLeadDays=number(payload.supplierLeadDays??0);
-   const wholeUnitRawKg=number(payload.wholeUnitRawKg??0),expectedYieldPct=number(payload.expectedYieldPct??100);
+   // Do not ask kitchen staff to configure a primary ingredient or product category.
+   // Preserve pre-existing values on edit for historical batch compatibility.
+   const previous=existingId?(await store.collection('pc_products').doc(id).get()).data():undefined;
+   const targetDays=number(payload.targetDays??10),minDays=number(payload.minDays??3);
    if(productKind==='finished'&&(
       typeof process!=='string'&&process!==undefined||typeof process==='string'&&process.length>12000||
       !Number.isInteger(targetDays)||targetDays<1||targetDays>180||
-      !Number.isInteger(minDays)||minDays<0||minDays>=targetDays||
-      !Number.isInteger(leadDays)||leadDays<0||leadDays>60||!Number.isInteger(supplierLeadDays)||supplierLeadDays<0||supplierLeadDays>90||
-      !Number.isFinite(wholeUnitRawKg)||wholeUnitRawKg<0||wholeUnitRawKg>100000||
-      !Number.isFinite(expectedYieldPct)||expectedYieldPct<=0||expectedYieldPct>100
+      !Number.isInteger(minDays)||minDays<0||minDays>=targetDays
    ))throw new Error('INVALID_PLANNING_CONFIG');
-   const previous=existingId?(await store.collection('pc_products').doc(id).get()).data():undefined;
    const processVersion=productKind==='finished'?((Number(previous?.processVersion)||0)+(previous?.preparationProcess===process?0:1)):undefined;
-   await store.collection('pc_products').doc(id).set({name:productKind==='ingredient'?name.toLocaleUpperCase('es-CA'):name,kind:productKind,category:text(payload.category,40)||'other',defaultUnit,bagWeightKg:productKind==='finished'?weight:null,siteIds:sites,active,
-    ...(productKind==='finished'?{targetDays,minDays,leadDays,supplierLeadDays,wholeUnitRawKg,expectedYieldPct,primaryIngredientId,preparationProcess:process??'',processVersion}:{}),updatedAt:stamp()},{merge:true});
+   await store.collection('pc_products').doc(id).set({name:productKind==='ingredient'?name.toLocaleUpperCase('es-CA'):name,kind:productKind,category:text(previous?.category,40)||'other',defaultUnit,bagWeightKg:productKind==='finished'?weight:null,siteIds:sites,active,
+    ...(productKind==='finished'?{targetDays,minDays,preparationProcess:process??'',processVersion,...(existingId?{leadDays:FieldValue.delete(),supplierLeadDays:FieldValue.delete(),wholeUnitRawKg:FieldValue.delete(),expectedYieldPct:FieldValue.delete()}: {})}:{}),updatedAt:stamp()},{merge:true});
    return NextResponse.json({ok:true,id});
   }
   throw new Error('INVALID_KIND');
@@ -240,6 +235,45 @@ export async function POST(req:NextRequest,context:Context){try{
   await audit('batch.create',site,employee,{batchId:id});
   return NextResponse.json({ok:true,id});
  }
+  if(action==='timer-correct'){
+   const batchId=text(payload.batchId,100),workEmployeeId=text(payload.workEmployeeId,100),reason=text(payload.reason,500);
+   if(!batchId||!workEmployeeId||!reason)throw new Error('INVALID_CORRECTION');
+   const batch=await store.collection('pc_batches').doc(batchId).get(),value=batch.data();
+   if(!value||!safeSite(value.siteId)||!['active','completed'].includes(value.status))throw new Error('INVALID_BATCH');
+   const site=value.siteId as Site;
+   const worker=await findEmployee(workEmployeeId,site),corrector=await findEmployee(payload.employeeId,site);
+   const incoming=payload.intervals,original=payload.originalIntervals;
+   if(!Array.isArray(incoming)||incoming.length>100||!Array.isArray(original)||original.length>100)throw new Error('INVALID_TIMER');
+   type Interval={startedAt:string;stoppedAt:string|null};
+   const now=Date.now();
+   const intervals:Interval[]=incoming.map((row:unknown,index:number)=>{
+    if(!row||typeof row!=='object')throw new Error('INVALID_TIMER');
+    const v=row as Record<string,unknown>;
+    const start=typeof v.startedAt==='string'?v.startedAt:'';
+    const stop=v.stoppedAt===null?null:typeof v.stoppedAt==='string'?v.stoppedAt:'';
+    const startTime=Date.parse(start),stopTime=stop?Date.parse(stop):NaN;
+    if(!Number.isFinite(startTime)||new Date(startTime).toISOString()!==start||startTime>now||startTime<=0)throw new Error('INVALID_TIMER');
+    if(stop!==null&&(!Number.isFinite(stopTime)||new Date(stopTime).toISOString()!==stop||stopTime<=startTime||stopTime>now))throw new Error('INVALID_TIMER');
+    if(stop===null&&(index!==incoming.length-1||value.status!=='active'))throw new Error('INVALID_TIMER');
+    return {startedAt:start,stoppedAt:stop};
+   });
+   for(let i=1;i<intervals.length;i++){
+    const prior=intervals[i-1].stoppedAt;
+    if(!prior||Date.parse(intervals[i].startedAt)<Date.parse(prior))throw new Error('OVERLAPPING_TIMER');
+   }
+   const ref=store.collection('pc_activities').doc(`${batchId}_${worker.id}`),revision=ref.collection('revisions').doc();
+   await store.runTransaction(async tx=>{
+    const current=await tx.get(ref),data=current.data();
+    const previous:Array<Interval>=Array.isArray(data?.intervals)?data.intervals:[];
+    if(JSON.stringify(previous)!==JSON.stringify(original))throw new Error('CONFLICT');
+    // Removing the final interval is a valid correction; an already-empty timer is a no-op.
+    if(JSON.stringify(previous)===JSON.stringify(intervals))throw new Error('NO_CHANGES');
+    tx.create(revision,{before:previous,after:intervals,reason,correctedById:corrector.id,correctedByName:corrector.name,createdAt:stamp()});
+    tx.set(ref,{batchId,siteId:site,operationalDate:value.operationalDate,employeeId:worker.id,employeeName:worker.name,intervals,running:intervals.at(-1)?.stoppedAt===null,updatedAt:stamp(),correctedAt:stamp(),correctedById:corrector.id,correctedByName:corrector.name,correctionCount:FieldValue.increment(1)},{merge:true});
+   });
+   await audit('timer.correct',site,corrector,{batchId,workEmployeeId:worker.id,revisionId:revision.id,reason});
+   return NextResponse.json({ok:true});
+  }
  if(['start','pause','input','finish'].includes(action)){
   const batchId=text(payload.batchId,80),ref=store.collection('pc_batches').doc(batchId);
   const snap=await ref.get(),b=snap.data();

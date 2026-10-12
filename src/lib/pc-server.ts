@@ -1,5 +1,5 @@
 import 'server-only';
-import {randomUUID,timingSafeEqual} from 'node:crypto';
+import {randomUUID} from 'node:crypto';
 import {cert, getApps, initializeApp} from 'firebase-admin/app';
 import {getAuth} from 'firebase-admin/auth';
 import {FieldValue, getFirestore, type Firestore} from 'firebase-admin/firestore';
@@ -33,16 +33,6 @@ export function db():Firestore {
 export function requireSameOrigin(request: Request): void {
   const origin=request.headers.get('origin');
   if(origin && new URL(origin).origin !== new URL(request.url).origin)throw new Error('FORBIDDEN');
-}
-
-/** Kitchen shared-device access: one PIN per session, separate from superadmin. */
-export function requireOperatorAccess(request:Request):void {
- requireSameOrigin(request);
- const expected=process.env.PC_OPERATIONS_PIN;
- if(!expected){if(process.env.NODE_ENV==='production')throw new Error('OPERATIONS_PIN_NOT_CONFIGURED');return;}
- const received=request.headers.get('x-pc-operations-pin')??'';
- const left=Buffer.from(received),right=Buffer.from(expected);
- if(left.length!==right.length||!timingSafeEqual(left,right))throw new Error('OPERATIONS_PIN_REQUIRED');
 }
 
 export async function requireSuperAdmin(request:Request):Promise<{uid:string;email:string}> {

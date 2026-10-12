@@ -11,12 +11,8 @@
 | Future planned demand | Baseline mean × (1 + sum event percentages/100) + additional daily event kg | Scenario |
 | Minimum kg | Baseline mean × minimum coverage days | `pc_products` / Scenario |
 | Target kg | Baseline mean × target coverage days | `pc_products` / Scenario |
-| Planned lot | Needed to restore target, rounded UP by whole raw-material unit × expected yield if configured | Scenario |
-| Production start date | Planned production availability date − configured production lead days | Scenario |
-| Purchase-by date | Production start date − configured supplier lead days | Scenario |
+| Planned lot | Kilograms needed to restore the target inventory in the selected scenario; the actual completed output comes from recorded bags plus extra kg | Scenario and `pc_batches` |
 | Labor productivity | kg finished ÷ recorded labor hours, when both present | `pc_batches`, `pc_activities` |
-| Real yield | kg finished ÷ kg of primary raw ingredient consumed × 100; convert g/lb to kg, never treat unit/liter as kg | `pc_batches`, `pc_inputs`, `pc_products.primaryIngredientId` |
-| Expected yield | Product's catalog target yield percentage | `pc_products` |
-| Ingredients estimated for planned lot | Mean historical ingredient amount per kg output × planned finished kg, **same unit only** | `pc_inputs`; not a validated recipe |
+| Ingredients estimated for planned lot | Each ingredient’s actual historical quantity per kg of finished product, keeping its own unit; only for planning, not a physical conversion/yield KPI | `pc_inputs`, `pc_batches`; indicative forecast |
 
-Limitations: Operations on absent dates are not zero consumption. A movement requires explicit entry to be excluded. An incoming Food Truck receipt is not yet mirrored as a verified inter-site transfer. Measurement error in opened bags is possible; users can correct audited counts. No automatically approved purchase or finance operation is created by a forecast. Exports v1 are incremental within the selected operational-date window, with explicit update watermark; consumers must upsert IDs and retain scheme versions. Hard deletion/tombstones are not yet modeled.
+Limitations: Operations on absent dates are not zero consumption. A movement requires explicit entry to be excluded. An incoming Food Truck receipt is not yet mirrored as a verified inter-site transfer. Measurement error in opened bags is possible; users can correct audited counts. No automatically approved purchase or finance operation is created by a forecast. Exports v2 are incremental within the selected operational-date window, with explicit update watermark; consumers must upsert IDs and retain schema versions. Hard deletion/tombstones are not yet modeled.
