@@ -1,5 +1,6 @@
 import 'server-only';
 import {db, operationalToday, safeSite, type Site} from '@/lib/pc-server';
+import {lineKg} from '@/lib/pc-weights';
 import type {EmployeeKpi, ManagementAlert, ManagementData, ManagementSummary, ProductKpi, SiteKpi, TrendPoint} from '@/lib/pc-management';
 
 const SITE_NAMES:Record<Site,string>={htl:'Hot Tacos Leamington',htw:'Hot Tacos Windsor',htft:'Hot Tacos Food Truck'};
@@ -57,7 +58,7 @@ function summaryFor(site:Site|undefined,counts:Row[],batches:Row[],activities:Ro
  summary.countCorrections=cs.reduce((sum,x)=>sum+n(x.correctionCount),0);
  summary.activeBatches=bs.filter(x=>x.status==='active').length;
  summary.completedBatches=bs.filter(x=>x.status==='completed').length;
- summary.bagsProduced=bs.filter(x=>x.status==='completed').reduce((sum,x)=>sum+n(x.bagCount),0);
+ summary.bagsProduced=round1(bs.filter(x=>x.status==='completed').reduce((sum,x)=>sum+n(x.equivalentBags??(n(x.bagCount)+n(x.partialKg)/(n(x.bagWeightKgSnapshot)||1))),0));
  summary.outputKg=round1(bs.filter(x=>x.status==='completed').reduce((sum,x)=>sum+n(x.outputKg),0));
  const now=Date.now();
  summary.trackedLaborHours=round1(as.reduce((sum,x)=>sum+hoursFromActivity(x,now),0));
@@ -67,17 +68,20 @@ function summaryFor(site:Site|undefined,counts:Row[],batches:Row[],activities:Ro
  return summary;
 }
 
-export async function buildManagementData():Promise<ManagementData>{
+export async function buildManagementData(filter?:{from?:string;to?:string}):Promise<ManagementData>{
  const store=db();
- const [countSnap,batchSnap,activitySnap,inputSnap]=await Promise.all([
-  store.collection('pc_counts').get(),
-  store.collection('pc_batches').get(),
+ const [countSnap,batchSnap,activitySnap,inputSnap,moveSnap,productSnap]=await Promise.all([
+  (filter?.from||filter?.to?store.collection('pc_counts').where('operationalDate','>=',filter.from??'2000-01-01').where('operationalDate','<=',filter.to??'2100-01-01'):store.collection('pc_counts')).get(),
+  (filter?.from||filter?.to?store.collection('pc_batches').where('operationalDate','>=',filter.from??'2000-01-01').where('operationalDate','<=',filter.to??'2100-01-01'):store.collection('pc_batches')).get(),
   store.collection('pc_activities').get(),
   store.collection('pc_inputs').get(),
+  (filter?.from||filter?.to?store.collection('pc_movements').where('operationalDate','>=',filter.from??'2000-01-01').where('operationalDate','<=',filter.to??'2100-01-01'):store.collection('pc_movements')).get(),
+  store.collection('pc_products').where('kind','==','finished').get(),
  ]);
  const docs=(snap:FirebaseFirestore.QuerySnapshot):Row[]=>snap.docs.map(d=>({...d.data(),id:d.id}));
- const counts=docs(countSnap),batches=docs(batchSnap),activities=docs(activitySnap),inputs=docs(inputSnap);
+ const counts=docs(countSnap),batches=docs(batchSnap);const batchIds=new Set(batches.map(x=>x.id));const activities=docs(activitySnap).filter(x=>batchIds.has(s(x.batchId)));const inputs=docs(inputSnap).filter(x=>batchIds.has(s(x.batchId))); 
 
+ const movesByKey=new Map<string,number>();for(const movement of docs(moveSnap)){if(!safeSite(movement.siteId)||typeof movement.operationalDate!=='string'||typeof movement.productId!=='string')continue;const mk=`${movement.siteId}:${movement.operationalDate}:${movement.productId}`;movesByKey.set(mk,(movesByKey.get(mk)??0)+n(movement.quantityKg));}
  const completedByKey=new Map<string,number>();
  for(const batch of batches){
   if(batch.status!=='completed'||!safeSite(batch.siteId)||!batch.operationalDate||!batch.productId)continue;
@@ -94,10 +98,10 @@ export async function buildManagementData():Promise<ManagementData>{
   for(const productId of ids){
    const open=openingLines.find(x=>x.productId===productId),close=closingLines.find(x=>x.productId===productId);
    if(!open||!close)continue;
-   const openKg=n(open.bagCount)*n(open.bagWeightKgSnapshot);
-   const closeKg=n(close.bagCount)*n(close.bagWeightKgSnapshot);
+   const openKg=lineKg(open);
+   const closeKg=lineKg(close);
    const produced=completedByKey.get(`${group.siteId}:${group.date}:${productId}`)??0;
-   const estimate=Math.max(0,openKg+produced-closeKg);
+   const estimate=Math.max(0,openKg+produced-closeKg-(movesByKey.get(`${group.siteId}:${group.date}:${productId}`)??0));
    estimatedBySite.set(group.siteId,(estimatedBySite.get(group.siteId)??0)+estimate);
    estimatedByProduct.set(productId,(estimatedByProduct.get(productId)??0)+estimate);
   }
@@ -130,7 +134,7 @@ export async function buildManagementData():Promise<ManagementData>{
   const productId=s(batch.productId);if(!productId)continue;
   batchProduct.set(batch.id,productId);
   const row=productMap.get(productId)??{productId,productName:s(batch.productName)||productId,completedBatches:0,bagsProduced:0,outputKg:0,trackedLaborHours:0,estimatedConsumptionKg:round1(estimatedByProduct.get(productId)??0)};
-  if(batch.status==='completed'){row.completedBatches+=1;row.bagsProduced+=n(batch.bagCount);row.outputKg+=n(batch.outputKg);}productMap.set(productId,row);
+  if(batch.status==='completed'){row.completedBatches+=1;row.bagsProduced+=n(batch.equivalentBags??(n(batch.bagCount)+n(batch.partialKg)/(n(batch.bagWeightKgSnapshot)||1)));row.outputKg+=n(batch.outputKg);}productMap.set(productId,row);
  }
  for(const activity of activities){
   const productId=batchProduct.get(s(activity.batchId));if(!productId)continue;
@@ -165,5 +169,5 @@ export async function buildManagementData():Promise<ManagementData>{
  }
  for(const siteId of SITES){const late=counts.filter(x=>x.siteId===siteId&&x.isLateEntry===true).length;if(late)alerts.push({kind:'late-entry',severity:'warning',siteId,title:'Capturas posteriores',detail:`${late} conteo(s) registrados después de la fecha operativa`});}
 
- return {generatedAt:new Date().toISOString(),summary:summaryFor(undefined,counts,batches,activities,inputs,estimatedBySite),bySite,byEmployee,byProduct,trend,alerts:alerts.slice(0,30)};
+ return {generatedAt:new Date().toISOString(),productCatalog:docs(productSnap).filter(r=>r.active!==false&&Array.isArray(r.siteIds)).map(r=>({id:r.id,name:s(r.name)||r.id,siteIds:r.siteIds as Site[]})),summary:summaryFor(undefined,counts,batches,activities,inputs,estimatedBySite),bySite,byEmployee,byProduct,trend,alerts:alerts.slice(0,30)};
 }

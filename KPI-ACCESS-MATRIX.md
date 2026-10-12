@@ -1,55 +1,11 @@
-# KPI access matrix — Production Control
+# Access matrix — Production Control (2026-10)
 
-## Public Showcase (`/showcase`)
+| Surface | Access | Data |
+|---|---|---|
+| Operational PWA (`/`, `/api/pc/snapshot` and operational POST actions) | Shared device PIN via `PC_OPERATIONS_PIN`, stored in `sessionStorage` for one browser tab session | Real catalog, operators, counts, batches, ingredient and movement records |
+| Management `/api/pc/management`, `/api/pc/report`, `/api/pc/export` | Firebase ID token, email allow-list, `portal_users/{uid}` active/admin | Real KPIs, report details, forecasts and Excel source data |
+| Public `/showcase`, `/api/showcase`, `/api/showcase-report` | No login | Functional, mathematically consistent demo numbers; never customers' Firestore records |
 
-Public by design. No login is required because the publication boundary contains only approved aggregate/normalized metrics.
+**Firestore Security Rules do not protect Admin SDK queries.** Next.js API auth checks are essential. `PC_OPERATIONS_PIN` is mandatory in production; without it the operational endpoints return 503 and do not open publicly. Apply WAF/rate limits for PIN guessing and use HTTPS; a shared PIN is not person-level authentication.
 
-Published fields:
-
-- Inventory control coverage percentage.
-- Production batch closure percentage.
-- Data-quality percentage.
-- Weighted operational-control score.
-- Generic `P-n` trend periods.
-- Normalized throughput index (base 100).
-- Normalized labor-efficiency index (base 100).
-- Control-coverage trend percentage.
-- Static transformation-capability descriptions.
-
-Not published:
-
-- Absolute kilograms or bags.
-- Absolute labor hours.
-- Estimated consumption kilograms.
-- Location/site names or comparisons.
-- Employee-level KPIs.
-- Product-level KPIs.
-- Exception details.
-- Late-entry counts, correction counts or signer mismatch details.
-- Firestore IDs or source documents.
-
-## Internal Management dashboard
-
-Authentication + server-side role authorization is required.
-
-Requirements:
-
-1. Valid Firebase Authentication ID token.
-2. Email must be in the server-side superadmin allow-list.
-3. `portal_users/{uid}` must exist with:
-
-```text
-active = true
-role = admin
-```
-
-The internal dashboard may display the richer management dataset because it is not part of the public publication boundary:
-
-- Absolute output kg and bags.
-- Absolute tracked labor hours.
-- Estimated consumption kg.
-- Location comparison.
-- Employee ranking/workload information.
-- Product production information.
-- Operational exception details.
-- Data-quality exception counts.
+Important: this version does not issue purchase orders, approve simulated production batches or reconcile financial balances. Production plans are simulations pending operational authorization.

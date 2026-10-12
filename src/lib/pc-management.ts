@@ -60,6 +60,7 @@ export type ManagementAlert = {
 };
 
 export type ManagementData = {
+  productCatalog: {id:string;name:string;siteIds:Site[]}[];
   generatedAt: string;
   summary: ManagementSummary;
   bySite: SiteKpi[];

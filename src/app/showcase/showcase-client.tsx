@@ -26,11 +26,15 @@ export function ShowcaseClient(){
   }
  },[]);
 
- useEffect(()=>{void load();},[load]);
+ useEffect(()=>{
+  // Schedule outside the synchronous effect body to satisfy React's effect rules.
+  const timer=window.setTimeout(()=>{void load();},0);
+  return ()=>window.clearTimeout(timer);
+ },[load]);
 
  return <main className="showcase-kpi-shell">
   {error&&!data?<section className="showcase-kpi-error" role="alert"><strong>No se pudieron cargar los KPIs.</strong><span>{error}</span><button type="button" onClick={()=>void load()}>Reintentar</button></section>:null}
   {loading&&!data?<section className="showcase-kpi-loading">Cargando indicadores…</section>:null}
-  {data?<ManagementDashboard data={data} lang="es" onRefresh={()=>void load()} showcase/>:null}
+  {data?<><div className="showcase-demo-banner"><strong>NIXINX · Demostración operativa</strong><span>Indicadores y escenarios funcionales con datos ilustrativos, sin información identificable de clientes.</span></div><ManagementDashboard data={data} lang="es" onRefresh={()=>void load()} showcase/></>:null}
  </main>;
 }

@@ -2,13 +2,14 @@ import {NextRequest, NextResponse} from 'next/server';
 import {FieldValue} from 'firebase-admin/firestore';
 import {isPCUnit} from '@/lib/pc-units';
 import {buildManagementData} from '@/lib/pc-kpis-server';
+import {equivalentBags,quantityKg,validRemainder} from '@/lib/pc-weights';
 import {
   audit,
   db,
   findEmployee,
   newId,
   operationalToday,
-  requireSameOrigin,
+  requireOperatorAccess,
   requireSuperAdmin,
   safeSite,
   stamp,
@@ -20,12 +21,12 @@ import {
 
 export const runtime='nodejs';
 type Context={params:Promise<{action:string}>};
-type CountLine={productId:string;bagCount:number};
+type CountLine={productId:string;bagCount:number;openKg?:number};
 const number=(v:unknown)=>typeof v==='number'?v:Number(v);
 
 function respond(error:unknown){
  const message=error instanceof Error?error.message:'SERVER_ERROR';
- const status=message==='ADMIN_AUTH_REQUIRED'?401:message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'||message==='FORBIDDEN'?403:message==='CONFLICT'?409:message.startsWith('Missing server')?503:message==='SERVER_ERROR'?500:400;
+ const status=message==='ADMIN_AUTH_REQUIRED'||message==='OPERATIONS_PIN_REQUIRED'?401:message==='SUPERADMIN_REQUIRED'||message==='ADMIN_ROLE_REQUIRED'||message==='FORBIDDEN'?403:message==='CONFLICT'?409:message.startsWith('Missing server')||message==='OPERATIONS_PIN_NOT_CONFIGURED'?503:message==='SERVER_ERROR'?500:400;
  console.error('PC API:',message);
  return NextResponse.json({error:message},{status});
 }
@@ -42,9 +43,12 @@ export async function GET(req:NextRequest,context:Context){try{
  const {action}=await context.params;
  if(action==='management'){
   await requireSuperAdmin(req);
-  return NextResponse.json(await buildManagementData(),{headers:{'Cache-Control':'no-store'}});
+  const from=req.nextUrl.searchParams.get('from')??undefined,to=req.nextUrl.searchParams.get('to')??undefined;
+  if(from&&!validDate(from)||to&&!validDate(to)||from&&to&&from>to)throw new Error('INVALID_DATES');
+  return NextResponse.json(await buildManagementData({from,to}),{headers:{'Cache-Control':'no-store'}});
  }
- if(action!=='snapshot'&&action!=='public')throw new Error('NOT_FOUND');
+ if(action!=='snapshot')throw new Error('NOT_FOUND');
+ requireOperatorAccess(req);
  const store=db();
  const [pr,pe,co,ba,ac,inputs]=await Promise.all([
   store.collection('pc_products').get(),
@@ -60,12 +64,14 @@ export async function GET(req:NextRequest,context:Context){try{
  const batches=scopedDocs(ba,null,'siteId').sort((a,b)=>String(b.operationalDate??'').localeCompare(String(a.operationalDate??''))).slice(0,100);
  const activities=scopedDocs(ac,null,'siteId');
  const inputRows=scopedDocs(inputs,null,'siteId');
- return NextResponse.json({products,staff,counts,batches,activities,inputs:inputRows},{headers:{'Cache-Control':'no-store'}});
+ const moveSnap=await store.collection('pc_movements').orderBy('operationalDate','desc').limit(150).get();
+ const movements=scopedDocs(moveSnap,null,'siteId');
+ return NextResponse.json({products,staff,counts,batches,activities,inputs:inputRows,movements},{headers:{'Cache-Control':'no-store'}});
 }catch(e){return respond(e);}}
 
 export async function POST(req:NextRequest,context:Context){try{
  const {action}=await context.params;
- requireSameOrigin(req);
+ requireOperatorAccess(req);
  const payload=await req.json() as Record<string,unknown>;
  const store=db();
  if(action==='catalog'){
@@ -95,10 +101,37 @@ export async function POST(req:NextRequest,context:Context){try{
    if(productKind==='ingredient'&&!isPCUnit(defaultUnit))throw new Error('INVALID_UNIT');
    if(!['finished','ingredient'].includes(String(productKind))||(productKind==='finished'&&(!Number.isFinite(weight)||weight<=0||weight>1000)))throw new Error('INVALID_PRODUCT');
    const id=typeof payload.id==='string'&&/^[\w-]{5,80}$/.test(payload.id)?payload.id:newId();
-   await store.collection('pc_products').doc(id).set({name:productKind==='ingredient'?name.toLocaleUpperCase('es-CA'):name,kind:productKind,category:text(payload.category,40)||'other',defaultUnit,bagWeightKg:productKind==='finished'?weight:null,siteIds:sites,active,updatedAt:stamp()},{merge:true});
+   const process=payload.preparationProcess;
+   const primaryIngredientId=text(payload.primaryIngredientId,80);
+   if(primaryIngredientId){const primary=await store.collection('pc_products').doc(primaryIngredientId).get();const value=primary.data();if(!value||value.kind!=='ingredient'||!validSites(value.siteIds)||!value.siteIds.includes(branch))throw new Error('INVALID_PRIMARY_INGREDIENT');}
+   const targetDays=number(payload.targetDays??10),minDays=number(payload.minDays??3),leadDays=number(payload.leadDays??0),supplierLeadDays=number(payload.supplierLeadDays??0);
+   const wholeUnitRawKg=number(payload.wholeUnitRawKg??0),expectedYieldPct=number(payload.expectedYieldPct??100);
+   if(productKind==='finished'&&(
+      typeof process!=='string'&&process!==undefined||typeof process==='string'&&process.length>12000||
+      !Number.isInteger(targetDays)||targetDays<1||targetDays>180||
+      !Number.isInteger(minDays)||minDays<0||minDays>=targetDays||
+      !Number.isInteger(leadDays)||leadDays<0||leadDays>60||!Number.isInteger(supplierLeadDays)||supplierLeadDays<0||supplierLeadDays>90||
+      !Number.isFinite(wholeUnitRawKg)||wholeUnitRawKg<0||wholeUnitRawKg>100000||
+      !Number.isFinite(expectedYieldPct)||expectedYieldPct<=0||expectedYieldPct>100
+   ))throw new Error('INVALID_PLANNING_CONFIG');
+   const previous=existingId?(await store.collection('pc_products').doc(id).get()).data():undefined;
+   const processVersion=productKind==='finished'?((Number(previous?.processVersion)||0)+(previous?.preparationProcess===process?0:1)):undefined;
+   await store.collection('pc_products').doc(id).set({name:productKind==='ingredient'?name.toLocaleUpperCase('es-CA'):name,kind:productKind,category:text(payload.category,40)||'other',defaultUnit,bagWeightKg:productKind==='finished'?weight:null,siteIds:sites,active,
+    ...(productKind==='finished'?{targetDays,minDays,leadDays,supplierLeadDays,wholeUnitRawKg,expectedYieldPct,primaryIngredientId,preparationProcess:process??'',processVersion}:{}),updatedAt:stamp()},{merge:true});
    return NextResponse.json({ok:true,id});
   }
   throw new Error('INVALID_KIND');
+ }
+ if(action==='movement'){
+  const site=payload.siteId,date=payload.operationalDate,kind=payload.movementKind,productId=text(payload.productId,80),quantityKg=number(payload.quantityKg);
+  if(!safeSite(site)||!validDate(date)||date>operationalToday()||!['foodtruck','catering','waste','adjustment'].includes(String(kind))||!Number.isFinite(quantityKg)||quantityKg<=0||quantityKg>100000)throw new Error('INVALID_MOVEMENT');
+  const employee=await findEmployee(payload.employeeId,site);
+  const psnap=await store.collection('pc_products').doc(productId).get(),pr=psnap.data();
+  if(!pr||pr.kind!=='finished'||!validSites(pr.siteIds)||!pr.siteIds.includes(site))throw new Error('INVALID_PRODUCT');
+  const id=newId();
+  await store.collection('pc_movements').doc(id).create({siteId:site,operationalDate:date,productId,productName:pr.name,movementKind:kind,quantityKg,notes:text(payload.notes,250),employeeId:employee.id,employeeName:employee.name,createdAt:stamp(),updatedAt:stamp()});
+  await audit('inventory.movement',site,employee,{id,productId,movementKind:kind,quantityKg});
+  return NextResponse.json({ok:true,id});
  }
  if(action==='count'){
   const site=payload.siteId;
@@ -117,7 +150,10 @@ export async function POST(req:NextRequest,context:Context){try{
    if(typeof row.productId!=='string'||!Number.isSafeInteger(row.bagCount)||row.bagCount<0||row.bagCount>100000)throw new Error('INVALID_COUNT');
    const doc=await store.collection('pc_products').doc(row.productId).get();const p=doc.data();
    if(!p||p.kind!=='finished'||!p.active||!validSites(p.siteIds)||!p.siteIds.includes(site))throw new Error('INVALID_PRODUCT');
-   lines.push({productId:doc.id,productName:p.name,bagCount:row.bagCount,bagWeightKgSnapshot:p.bagWeightKg});
+   const weight=Number(p.bagWeightKg);
+   if(!Number.isFinite(weight)||weight<=0)throw new Error('INVALID_PRODUCT');
+   const openKg=validRemainder(row.openKg,weight);
+   lines.push({productId:doc.id,productName:p.name,bagCount:row.bagCount,openKg,totalKg:quantityKg(row.bagCount,openKg,weight),bagWeightKgSnapshot:weight});
   }
   const id=`${site}_${date}_${period}`;
   try{
@@ -135,19 +171,20 @@ export async function POST(req:NextRequest,context:Context){try{
   const employee=await findEmployee(payload.employeeId,existing.siteId);
   const rows=payload.lines;
   if(!Array.isArray(rows)||rows.length!==existing.lines.length)throw new Error('INVALID_COUNT');
-  const current=existing.lines as Array<{productId:string;productName:string;bagCount:number;bagWeightKgSnapshot:number}>;
+  const current=existing.lines as Array<{productId:string;productName:string;bagCount:number;openKg?:number;bagWeightKgSnapshot:number}>;
   const next=current.map(line=>{
    const proposed=rows.find((row:unknown)=>typeof row==='object'&&row!==null&&(row as CountLine).productId===line.productId) as CountLine|undefined;
    if(!proposed||!Number.isSafeInteger(proposed.bagCount)||proposed.bagCount<0||proposed.bagCount>100000)throw new Error('INVALID_COUNT');
-   return {...line,bagCount:proposed.bagCount};
+   const openKg=validRemainder(proposed.openKg,line.bagWeightKgSnapshot);
+   return {...line,bagCount:proposed.bagCount,openKg,totalKg:quantityKg(proposed.bagCount,openKg,line.bagWeightKgSnapshot)};
   });
-  if(next.every((line,i)=>line.bagCount===current[i].bagCount))throw new Error('NO_CHANGES');
+  if(next.every((line,i)=>line.bagCount===current[i].bagCount&&line.openKg===(current[i].openKg??0)))throw new Error('NO_CHANGES');
   const revision=ref.collection('revisions').doc();
   await store.runTransaction(async tx=>{
    const latest=await tx.get(ref);
    if(!latest.exists||latest.updateTime?.toMillis()!==before.updateTime?.toMillis())throw new Error('CONFLICT');
    tx.create(revision,{before:current,after:next,reason,correctedById:employee.id,correctedByName:employee.name,createdAt:stamp()});
-   tx.update(ref,{lines:next,correctedAt:stamp(),correctedById:employee.id,correctedByName:employee.name,correctionCount:FieldValue.increment(1)});
+   tx.update(ref,{lines:next,updatedAt:stamp(),correctedAt:stamp(),correctedById:employee.id,correctedByName:employee.name,correctionCount:FieldValue.increment(1)});
   });
   await audit('count.correct',existing.siteId,employee,{countId:id,revisionId:revision.id,reason});
   return NextResponse.json({ok:true});
@@ -165,7 +202,7 @@ export async function POST(req:NextRequest,context:Context){try{
    const latest=await tx.get(ref);
    if(!latest.exists||latest.updateTime?.toMillis()!==before.updateTime?.toMillis())throw new Error('CONFLICT');
    tx.create(revision,{before:{quantity:old.quantity,unit:old.unit},after:{quantity:qty,unit},reason,correctedById:employee.id,correctedByName:employee.name,createdAt:stamp()});
-   tx.update(ref,{quantity:qty,unit,correctedAt:stamp(),correctedById:employee.id,correctedByName:employee.name,correctionCount:FieldValue.increment(1)});
+   tx.update(ref,{quantity:qty,unit,updatedAt:stamp(),correctedAt:stamp(),correctedById:employee.id,correctedByName:employee.name,correctionCount:FieldValue.increment(1)});
   });
   await audit('input.correct',old.siteId,employee,{inputId:id,batchId:old.batchId,revisionId:revision.id,reason});
   return NextResponse.json({ok:true});
@@ -176,13 +213,16 @@ export async function POST(req:NextRequest,context:Context){try{
   const ref=store.collection('pc_batches').doc(id),before=await ref.get(),old=before.data();
   if(!old||old.status!=='completed'||!safeSite(old.siteId)||!Number.isFinite(old.bagWeightKgSnapshot))throw new Error('INVALID_BATCH');
   const employee=await findEmployee(payload.employeeId,old.siteId);
-  if(old.bagCount===bags)throw new Error('NO_CHANGES');
+  const partialKg=validRemainder(payload.partialKg,old.bagWeightKgSnapshot);
+  const outputKg=quantityKg(bags,partialKg,old.bagWeightKgSnapshot);
+  if(outputKg<=0)throw new Error('INVALID_OUTPUT');
+  if(outputKg===old.outputKg&&bags===old.bagCount)throw new Error('NO_CHANGES');
   const revision=ref.collection('revisions').doc();
   await store.runTransaction(async tx=>{
    const latest=await tx.get(ref);
    if(!latest.exists||latest.updateTime?.toMillis()!==before.updateTime?.toMillis())throw new Error('CONFLICT');
-   tx.create(revision,{before:{bagCount:old.bagCount,outputKg:old.outputKg},after:{bagCount:bags,outputKg:bags*old.bagWeightKgSnapshot},reason,correctedById:employee.id,correctedByName:employee.name,createdAt:stamp()});
-   tx.update(ref,{bagCount:bags,outputKg:bags*old.bagWeightKgSnapshot,correctedAt:stamp(),correctedById:employee.id,correctedByName:employee.name,correctionCount:FieldValue.increment(1)});
+   tx.create(revision,{before:{bagCount:old.bagCount,partialKg:old.partialKg??0,outputKg:old.outputKg},after:{bagCount:bags,partialKg,outputKg},reason,correctedById:employee.id,correctedByName:employee.name,createdAt:stamp()});
+   tx.update(ref,{bagCount:bags,partialKg,outputKg,equivalentBags:equivalentBags(outputKg,old.bagWeightKgSnapshot),updatedAt:stamp(),correctedAt:stamp(),correctedById:employee.id,correctedByName:employee.name,correctionCount:FieldValue.increment(1)});
   });
   await audit('output.correct',old.siteId,employee,{batchId:id,revisionId:revision.id,reason});
   return NextResponse.json({ok:true});
@@ -196,7 +236,7 @@ export async function POST(req:NextRequest,context:Context){try{
   const product=await store.collection('pc_products').doc(productId).get();const p=product.data();
   if(!p||!p.active||p.kind!=='finished'||!validSites(p.siteIds)||!p.siteIds.includes(site))throw new Error('INVALID_PRODUCT');
   const id=newId();
-  await store.collection('pc_batches').doc(id).create({siteId:site,productId,productName:p.name,operationalDate:date,status:'active',createdById:employee.id,createdByName:employee.name,createdAt:stamp()});
+  await store.collection('pc_batches').doc(id).create({siteId:site,productId,productName:p.name,operationalDate:date,status:'active',processSnapshot:p.preparationProcess??'',processVersionSnapshot:p.processVersion??1,createdById:employee.id,createdByName:employee.name,createdAt:stamp(),updatedAt:stamp()});
   await audit('batch.create',site,employee,{batchId:id});
   return NextResponse.json({ok:true,id});
  }
@@ -218,7 +258,7 @@ export async function POST(req:NextRequest,context:Context){try{
      if(value?.running!==true||!intervals.length)throw new Error('NOT_RUNNING');
      intervals[intervals.length-1]={...intervals[intervals.length-1],stoppedAt:new Date().toISOString()};
     }
-    tx.set(activity,{batchId,siteId:site,employeeId:employee.id,employeeName:employee.name,running:action==='start',intervals,updatedAt:stamp()},{merge:true});
+    tx.set(activity,{batchId,siteId:site,operationalDate:b.operationalDate,employeeId:employee.id,employeeName:employee.name,running:action==='start',intervals,updatedAt:stamp()},{merge:true});
    });
    await audit(`timer.${action}`,site,employee,{batchId});
    return NextResponse.json({ok:true});
@@ -228,16 +268,19 @@ export async function POST(req:NextRequest,context:Context){try{
    if(!Number.isFinite(quantity)||quantity<=0||quantity>100000||!isPCUnit(unit))throw new Error('INVALID_INPUT');
    const ingredient=await store.collection('pc_products').doc(ingredientId).get(),p=ingredient.data();
    if(!p||p.kind!=='ingredient'||!p.active||!validSites(p.siteIds)||!p.siteIds.includes(site))throw new Error('INVALID_INGREDIENT');
-   const id=newId();await store.collection('pc_inputs').doc(id).create({batchId,siteId:site,ingredientId,ingredientName:p.name,quantity,unit,employeeId:employee.id,employeeName:employee.name,createdAt:stamp()});
+   const id=newId();await store.collection('pc_inputs').doc(id).create({batchId,siteId:site,operationalDate:b.operationalDate,ingredientId,ingredientName:p.name,quantity,unit,employeeId:employee.id,employeeName:employee.name,createdAt:stamp(),updatedAt:stamp()});
    await audit('batch.input',site,employee,{batchId,id});return NextResponse.json({ok:true,id});
   }
   if(action==='finish'){
-   const bagCount=number(payload.bagCount),product=await store.collection('pc_products').doc(b.productId).get(),weight=product.data()?.bagWeightKg;
-   if(!Number.isSafeInteger(bagCount)||bagCount<=0||!Number.isFinite(weight)||weight<=0)throw new Error('INVALID_OUTPUT');
+   const bagCount=number(payload.bagCount),product=await store.collection('pc_products').doc(b.productId).get(),weight=Number(product.data()?.bagWeightKg);
+   if(!Number.isSafeInteger(bagCount)||bagCount<0||bagCount>100000||!Number.isFinite(weight)||weight<=0)throw new Error('INVALID_OUTPUT');
+   const partialKg=validRemainder(payload.partialKg,weight);
+   const outputKg=quantityKg(bagCount,partialKg,weight);
+   if(outputKg<=0)throw new Error('INVALID_OUTPUT');
    const running=await store.collection('pc_activities').where('batchId','==',batchId).get();
    if(running.docs.some(doc=>doc.data().running===true))throw new Error('TIMERS_RUNNING');
-   await store.runTransaction(async tx=>{const fresh=await tx.get(ref);if(fresh.data()?.status!=='active')throw new Error('CONFLICT');tx.update(ref,{status:'completed',bagCount,bagWeightKgSnapshot:weight,outputKg:bagCount*weight,completedById:employee.id,completedByName:employee.name,completedAt:stamp()});});
-   await audit('batch.finish',site,employee,{batchId,bagCount});return NextResponse.json({ok:true});
+   await store.runTransaction(async tx=>{const fresh=await tx.get(ref);if(fresh.data()?.status!=='active')throw new Error('CONFLICT');tx.update(ref,{status:'completed',bagCount,partialKg,bagWeightKgSnapshot:weight,outputKg,equivalentBags:equivalentBags(outputKg,weight),completedById:employee.id,completedByName:employee.name,completedAt:stamp(),updatedAt:stamp()});});
+   await audit('batch.finish',site,employee,{batchId,bagCount,partialKg,outputKg});return NextResponse.json({ok:true});
   }
  }
  throw new Error('NOT_FOUND');
