@@ -1,0 +1,8 @@
+.pc-consulta{max-width:1200px;margin:0 auto;padding:20px;display:grid;gap:16px}
+.pc-consulta-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.pc-consulta-head h1{font-size:30px;color:#193c58}.pc-consulta-head a{color:#235b7e;text-decoration:underline}
+.pc-consulta-login{max-width:520px}.pc-consulta-login form{display:grid;gap:12px}.pc-consulta-login label{display:grid;gap:5px}
+.pc-oper-chart{display:flex;gap:7px;overflow-x:auto;border-bottom:1px solid #dae6ef;align-items:flex-end;min-height:185px;padding:12px 4px 0}
+.pc-chart-day{display:grid;gap:6px;flex:1;min-width:42px;text-align:center}.pc-chart-day small{font-size:10px;color:#687d8f}
+.pc-chart-bars{height:145px;display:flex;align-items:flex-end;gap:3px}.pc-chart-bars i{display:block;min-height:1px;width:33%;background:#205d87;border-radius:3px 3px 0 0}.pc-chart-bars i:nth-child(2){background:#75acc7}.pc-chart-bars i:nth-child(3){background:#5b937a}
+.pc-chart-legend{font-size:12px;color:#466273}
+@media(max-width:620px){.pc-consulta{padding:12px}.pc-consulta-head{flex-direction:column}}

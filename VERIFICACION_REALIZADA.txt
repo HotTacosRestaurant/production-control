@@ -1,4 +1,6 @@
-33 archivos TypeScript/TSX: analisis sintactico sin errores.
-Pruebas de peso, legados, consumo, exclusiones, eventos, lotes indivisibles y restricciones: PASS.
-Excel OOXML: archivo ZIP validado.
-No se pudo ejecutar build/tsc completo por dependencias no instalables en este entorno. Ejecutar npm ci, npx tsc --noEmit, npm run lint y npm run build en VS Code antes de push.
+14/oct/2026 — Preparación de reemplazos completos
+- Se comprobaron estructuras y sintaxis TS/TSX mediante TypeScript global.
+- Se comprobaron ejemplos matemáticos de empaques y conversiones sin acceder a Firestore.
+- NO se completó npm ci ni Next.js build por imposibilidad de descargar dependencias.
+- NO hubo acceso a Firestore/Vercel de producción. Recomendada validación en staging.
+Ver LEEME_INSTALACION.md para pasos, configuración y pruebas.

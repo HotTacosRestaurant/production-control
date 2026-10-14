@@ -1,3 +1,4 @@
+import {pcOperationalDate} from '@/lib/pc-date';
 import {NextResponse} from 'next/server';
 import {demoReport} from '@/lib/pc-reports-server';
 import {addDays} from '@/lib/pc-forecast';
@@ -5,7 +6,7 @@ import type {ManagementData,ManagementSummary,TrendPoint} from '@/lib/pc-managem
 export const runtime='nodejs';
 /** Fully numerical demo sharing its inputs with the forecast; no private data. */
 export async function GET(){
- const to=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ const to=pcOperationalDate();
  const from=addDays(to,-29);
  const report=demoReport({historyFrom:from,historyTo:to,baseFrom:from,baseTo:to,siteId:'htw',productId:'protein-01',forecastDays:14,excluded:[],events:[]});
  const historical=report.scenario.historical;

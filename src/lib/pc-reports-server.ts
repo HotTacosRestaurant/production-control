@@ -26,8 +26,12 @@ export async function loadReport(config:ScenarioConfig):Promise<ReportPayload>{
  const movements=convert(movementSnap).filter(v=>v.siteId===config.siteId&&v.productId===config.productId);
  const batches=convert(batchesSnap).filter(v=>v.siteId===config.siteId&&v.productId===config.productId);
  const batchIds=new Set(batches.map(b=>b.id));
- // Legacy activities and inputs can lack operationalDate; join by batch ID for correctness.
- const [inputSnap,activitySnap]=await Promise.all([store.collection('pc_inputs').get(),store.collection('pc_activities').get()]);
+ // Range queries prevent years of operational inputs/activities being read into memory.
+ // Legacy rows without operationalDate require manual one-time backfill if they must appear in these reports.
+ const [inputSnap,activitySnap]=await Promise.all([
+  store.collection('pc_inputs').where('operationalDate','>=',from).where('operationalDate','<=',to).get(),
+  store.collection('pc_activities').where('operationalDate','>=',from).where('operationalDate','<=',to).get(),
+ ]);
  const inputs=convert(inputSnap).filter(v=>batchIds.has(text(v.batchId)));
  const activities=convert(activitySnap).filter(v=>batchIds.has(text(v.batchId)));
  const historical=deriveDaily(counts as CountRecord[],batches as BatchRecord[],config.siteId,config.productId,movements as MovementRecord[]);

@@ -1,11 +1,17 @@
-# Access matrix — Production Control (2026-10)
+# Matriz de accesos — Production Control (octubre 2026)
 
-| Surface | Access | Data |
-|---|---|---|
-| Operational PWA (`/`, `/api/pc/snapshot` and operational POST actions) | Shared device PIN via `PC_OPERATIONS_PIN`, stored in `sessionStorage` for one browser tab session | Real catalog, operators, counts, batches, ingredient and movement records |
-| Management `/api/pc/management`, `/api/pc/report`, `/api/pc/export` | Firebase ID token, email allow-list, `portal_users/{uid}` active/admin | Real KPIs, report details, forecasts and Excel source data |
-| Public `/showcase`, `/api/showcase`, `/api/showcase-report` | No login | Functional, mathematically consistent demo numbers; never customers' Firestore records |
+| Función | Cocina sin iniciar sesión | Usuario `viewer` autenticado | Superadmin |
+|---|---|---|---|
+| Captura de conteos y productos | Sí | Sí, desde PWA operativa | Sí |
+| Cronómetros, ingredientes y fin de lote | Sí | Sí, desde PWA operativa | Sí |
+| Correcciones de registros | Con `PC_CORRECTION_CODE` del encargado | Con código | Con código |
+| Consulta operativa `/consulta` | No, requiere login | Sí | Sí |
+| Gráfica de conteos/producción en `/consulta` | No, requiere login | Sí | Sí |
+| KPIs `/api/pc/management`, reportes y exportación | No | No | Sí: token Firebase + allowlist + rol `admin` |
+| Showcase demostrativo `/showcase` | Sí | Sí | Sí |
 
-**Firestore Security Rules do not protect Admin SDK queries.** Next.js API auth checks are essential. `PC_OPERATIONS_PIN` is mandatory in production; without it the operational endpoints return 503 and do not open publicly. Apply WAF/rate limits for PIN guessing and use HTTPS; a shared PIN is not person-level authentication.
+Un usuario `viewer` requiere **Firebase Authentication** y `portal_users/{uid}` con `active=true` y `role='viewer'`. El superadmin requiere rol `admin` y el correo en la lista de autorizados. La cocina continúa sin cuentas y sin PIN.
 
-Important: this version does not issue purchase orders, approve simulated production batches or reconcile financial balances. Production plans are simulations pending operational authorization.
+**Importante:** como la API operativa básica también permite consultar información necesaria para cocina sin autenticación, el uso de `/consulta` con login **no convierte en privados todos los datos de operación**. Solo Management/KPIs y la pantalla de consultas tienen control de acceso a nivel de ruta. Para confidencialidad completa de los históricos habría que limitar la API pública y diseñar un acceso de captura separado.
+
+Las correcciones conservan revisiones y exigen un secreto del servidor; nunca guardes el secreto en el repositorio o en `NEXT_PUBLIC_*`.

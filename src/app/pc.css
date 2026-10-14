@@ -102,3 +102,161 @@
 .ux-batch-input-list li{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #e7edf2;padding:6px 0}
 .forecast-ingredient-list li{padding:5px 0;border-bottom:1px solid #e7edf2}
 .forecast-actual-breakdown{display:block;color:#5d7184;font-size:12px;margin-top:4px}
+
+/* Production Control: compact period histories, bag presentations and shared finish controls. */
+.pc-period{display:flex;flex-wrap:wrap;align-items:end;gap:10px;margin:12px 0}
+.pc-period label{display:grid;gap:5px;font-size:12px;font-weight:700;color:#274861}
+.pc-period input{min-height:42px;padding:8px;border:1px solid #c4d6e3;border-radius:9px;background:#fff}
+.pc-period button{min-height:42px}
+.pc-table-scroll{width:100%;overflow-x:auto;border:1px solid #d7e5ef;border-radius:12px;background:#fff}
+.pc-compact-table{width:100%;border-collapse:collapse;font-size:13px}
+.pc-compact-table th,.pc-compact-table td{text-align:left;vertical-align:top;border-bottom:1px solid #e1eaf1;padding:9px 12px;min-width:145px}
+.pc-compact-table tbody th{white-space:nowrap;color:#234a67}
+.pc-compact-table thead th{background:#eef4f8;color:#315770}
+.pc-compact-table tbody tr:last-child td,.pc-compact-table tbody tr:last-child th{border-bottom:0}
+.pc-row-detail summary{cursor:pointer;white-space:nowrap;color:#215c81}
+.pc-row-detail[open]{min-width:210px}
+.pc-row-detail div{font-size:12px;line-height:1.55;color:#4d6475;margin:5px 0;white-space:normal}
+.pc-row-detail button{margin-top:6px}
+.pc-missing{font-size:12px;white-space:nowrap}
+.pc-pack-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.pc-pack-form label{min-width:0}
+.pc-finish-panel{border:1px solid #c7dfd0;border-radius:12px;background:#f2faf5;padding:14px;margin-top:12px}
+.pc-finish-panel h3,.pc-full-row{grid-column:1/-1;margin:0}
+.pc-finish-panel>button{min-width:180px}
+.pc-batch-completed{padding:10px 14px;margin-bottom:9px}
+.pc-batch-completed .ux-batch-head{margin-bottom:2px}
+.pc-batch-completed .ux-task{margin-bottom:0}
+@media(max-width:680px){.pc-pack-form{grid-template-columns:1fr}.pc-period label{flex:1;min-width:130px}.pc-period button{width:100%}.pc-compact-table th,.pc-compact-table td{padding:8px;min-width:105px}.pc-finish-panel{display:grid;grid-template-columns:1fr}}
+.pc-day-production{border:1px solid #d7e5ef;border-radius:12px;background:#fff;margin:8px 0;padding:10px 14px}
+.pc-day-production>summary{cursor:pointer;padding:5px;color:#224d6a}
+.pc-closed-batch{border-top:1px solid #e0e9ef;padding:8px 10px}
+.pc-closed-batch>summary{display:flex;align-items:center;justify-content:space-between;gap:14px;cursor:pointer;flex-wrap:wrap}
+.pc-closed-batch>summary span{color:#35607b;font-size:12px}
+.pc-closed-batch>*:not(summary){margin:6px 0}
+.pc-person-completed{padding:8px 0;border-bottom:1px solid #e0e8f0;font-size:13px}
+.pc-consulta-link{display:inline-flex;align-items:center;padding:8px 10px;border-radius:8px;text-decoration:underline;color:#20567c;font-size:13px}
+
+/* Compact kitchen capture: one physical row per product, no nested scrolling. */
+.ux-count{max-width:1120px}
+.ux-count .ux-paper.pc-count-paper{padding:16px 20px}
+.pc-count-head,.pc-count-row{display:grid;grid-template-columns:minmax(170px,1fr) 174px 167px minmax(95px,125px);column-gap:14px;align-items:center}
+.pc-count-head{padding:6px 10px 9px;border-bottom:2px solid #dbe6ef;color:#59738a;font-size:12px;font-weight:750}
+.pc-count-head span:last-child{text-align:right}
+.ux-count .pc-count-table{max-height:none;overflow:visible;min-height:0}
+.ux-count .pc-count-row{padding:7px 10px;min-height:61px;border-bottom:1px solid #e3ebf2}
+.ux-count .pc-count-row:nth-child(even){background:#f8fbfd}
+.ux-count .pc-count-row .ux-bag-name{gap:2px;min-width:0}
+.ux-count .pc-count-row .ux-bag-name strong{font-size:14px;line-height:1.2}
+.ux-count .pc-count-row .ux-bag-name small{font-size:11px}
+.ux-count .pc-count-row .ux-stepper{gap:4px;justify-content:flex-start}
+.ux-count .pc-count-row .ux-stepper button{height:39px;width:38px;font-size:22px;border-radius:8px;flex-shrink:0}
+.ux-count .pc-count-row .ux-stepper input{width:64px;min-height:39px;height:39px;font-size:16px;border-radius:8px}
+.ux-count .pc-count-row .pc-count-open{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0;flex-basis:auto;font-size:11px;color:#48677d}
+.ux-count .pc-count-row .pc-count-open span{white-space:nowrap}
+.ux-count .pc-count-row .pc-count-open input{width:65px;min-height:39px;height:39px;max-width:none;padding:5px 6px;font-size:14px;text-align:center}
+.ux-count .pc-count-row .pc-count-amount{grid-column:auto;grid-row:auto;text-align:right;font-size:14px;color:#264d6a;white-space:nowrap}
+.ux-count .pc-count-total{padding:10px 13px;font-size:14px;margin-top:10px}
+.ux-count .pc-count-total strong{font-size:18px}
+.ux-count .pc-count-paper .ux-bottom{margin-top:12px}
+
+/* Active production: show participating staff only; group old unfinished batches. */
+.pc-active-list,.pc-completed-section{margin:12px 0 16px}
+.pc-list-title{display:flex;align-items:center;gap:8px;font-size:16px!important;margin:12px 0 9px!important}
+.pc-list-title span{font-size:12px;color:#56738a;background:#e8f0f7;border-radius:20px;padding:3px 8px}
+.ux-production .pc-active-card{padding:13px 17px;margin-bottom:9px}
+.pc-active-card .ux-batch-head{padding-bottom:8px}
+.pc-active-card .ux-batch-head h2{font-size:18px}
+.pc-active-card .ux-batch-head small{font-size:12px}
+.pc-active-card .ux-process.pc-process-collapsed{margin:6px 0;padding:7px 10px;font-size:12px}
+.pc-active-card .ux-task-head,.pc-person-row .ux-task-head{padding:9px 7px;min-height:40px;font-size:13px}
+.pc-active-card .ux-task-head b,.pc-person-row .ux-task-head b{font-size:16px}
+.pc-active-card .ux-task-body,.pc-person-row .ux-task-body{padding:12px;margin:6px 0}
+.pc-active-card .ux-worktime,.pc-person-row .ux-worktime{font-size:23px;margin:6px 0}
+.pc-active-card .ux-timer-correct,.pc-person-row .ux-timer-correct{min-height:28px;margin:0 auto 6px}
+.pc-active-card .ux-task-body>.ux-main-button,.pc-active-card .ux-task-body>.ux-pause,.pc-person-row .ux-task-body>.ux-main-button,.pc-person-row .ux-task-body>.ux-pause{min-height:41px;margin-bottom:9px}
+.pc-add-participant{display:flex!important;align-items:center;flex-wrap:wrap;gap:9px;padding:7px 0;font-size:12px!important;color:#456a82;font-weight:600!important}
+.pc-add-participant select{width:auto;max-width:280px;min-height:38px;padding:7px 10px;font-size:12px}
+.pc-pending-group{margin:12px 0;border:1px solid #eed9b9;border-radius:12px;background:#fffaf3;padding:0 14px}
+.pc-pending-group>summary{cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:14px;padding:12px 4px;color:#79501f;font-size:13px}
+.pc-pending-group>summary span{border-radius:18px;background:#f7e8d1;padding:3px 10px}
+.pc-pending-body{padding-top:8px}
+.pc-empty-state{color:#6c8294;font-size:13px;padding:10px 12px}
+
+/* Finish form: readable grid instead of an overflowing horizontal flex row. */
+.ux-production .pc-finish-panel{display:grid;grid-template-columns:minmax(145px,1.1fr) minmax(100px,.8fr) minmax(145px,1.1fr) minmax(95px,.6fr) auto;align-items:end;gap:8px 10px;padding:11px 13px;margin-top:10px}
+.ux-production .pc-finish-panel h3{font-size:14px;grid-column:1/-1}
+.ux-production .pc-finish-panel label{min-width:0;max-width:none;font-size:12px}
+.ux-production .pc-finish-panel input,.ux-production .pc-finish-panel select{min-width:0;min-height:40px;padding:8px;font-size:13px}
+.ux-production .pc-finish-panel .ux-inline-total{font-size:12px;white-space:nowrap;margin:0;align-self:center}
+.ux-production .pc-finish-panel>button{width:auto;min-width:165px;min-height:41px;font-size:12px;padding:8px 12px;white-space:nowrap}
+.ux-production .pc-finish-panel>.pc-full-row{grid-column:1/-1;font-size:12px}
+.ux-production .pc-finish-panel>.ux-warning{margin:1px 0}
+
+/* One-line person overview; details open only on demand. */
+.pc-person-overview{border:1px solid #dbe6ef;background:#fff;border-radius:12px;overflow:hidden;margin:12px 0}
+.pc-person-row{border-bottom:1px solid #e1eaf1}
+.pc-person-row:last-child{border-bottom:0}
+.pc-person-row>summary{position:relative;display:grid;grid-template-columns:minmax(130px,210px) minmax(0,1fr) 95px;align-items:center;gap:13px;padding:11px 16px;cursor:pointer;list-style:none}
+.pc-person-row>summary::-webkit-details-marker{display:none}
+.pc-person-row>summary::before{content:'▸';position:absolute;left:5px;color:#7d97a9;font-size:11px}
+.pc-person-row[open]>summary::before{content:'▾'}
+.pc-person-row>summary strong{font-size:14px;color:#244a67}
+.pc-person-row>summary span{font-size:12px;color:#607b91;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pc-person-row>summary b{text-align:right;font-size:13px;font-variant-numeric:tabular-nums}
+.pc-person-row[open]>summary{background:#f0f6fa}
+.pc-person-row-body{padding:10px 16px 14px}
+.pc-person-work{border-bottom:1px solid #e5edf2;padding-bottom:8px}
+.pc-person-work>small{color:#59778e;font-size:12px}
+.pc-person-work .pc-finish-panel{margin-left:5px}
+
+/* Daily history: date and completed output in one compact row. */
+.ux-production .pc-completed-day{padding:0;margin:5px 0;border-radius:9px}
+.ux-production .pc-completed-day>summary{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:9px 13px;color:#245270;font-size:13px}
+.ux-production .pc-completed-day>summary span{font-size:12px;color:#58768d}
+.ux-production .pc-completed-day-body{padding:0 9px 5px}
+.ux-production .pc-closed-batch{padding:0;margin:0;border-top:1px solid #e5ebef}
+.ux-production .pc-closed-batch>summary{padding:8px 8px;font-size:13px}
+.ux-production .pc-closed-batch>summary span{font-size:12px}
+.ux-production .pc-completed-details{padding:8px 10px 12px;background:#fafcfe}
+.ux-production .pc-completed-details .ux-process{padding:8px;margin:7px 0;font-size:12px}
+.ux-production .pc-completed-actions{display:flex;flex-wrap:wrap;gap:8px}
+.ux-production .pc-person-completed{padding:7px 0}
+
+@media(max-width:1020px){
+ .ux-production .pc-finish-panel{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .ux-production .pc-finish-panel .ux-inline-total{grid-column:1/2}
+ .ux-production .pc-finish-panel>button{grid-column:2/4;width:100%}
+}
+@media(max-width:760px){
+ .ux-count .ux-paper.pc-count-paper{padding:12px}
+ .pc-count-head{display:none}
+ .ux-count .pc-count-row{grid-template-columns:minmax(0,1fr) auto;gap:5px 10px;padding:9px 5px;min-height:90px}
+ .ux-count .pc-count-row .ux-bag-name{grid-column:1;grid-row:1}
+ .ux-count .pc-count-row .pc-count-amount{grid-column:2;grid-row:1}
+ .ux-count .pc-count-row .ux-stepper{grid-column:1;grid-row:2}
+ .ux-count .pc-count-row .pc-count-open{grid-column:2;grid-row:2}
+ .ux-count .pc-count-row .ux-stepper input{width:50px}
+ .ux-count .pc-count-row .ux-stepper button{width:34px}
+ .ux-count .pc-count-row .pc-count-open span{font-size:11px}
+ .ux-count .pc-count-row .pc-count-open input{width:58px}
+ .pc-person-row>summary{grid-template-columns:minmax(85px,115px) minmax(0,1fr) 75px;gap:7px;padding:11px 12px}
+ .pc-person-row>summary strong{font-size:13px}
+ .pc-person-row>summary b{font-size:12px}
+}
+@media(max-width:620px){
+ .ux-production .pc-finish-panel{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .ux-production .pc-finish-panel h3,.ux-production .pc-finish-panel>.pc-full-row{grid-column:1/-1}
+ .ux-production .pc-finish-panel .ux-inline-total{grid-column:1}
+ .ux-production .pc-finish-panel>button{grid-column:1/-1;width:100%}
+ .pc-add-participant{align-items:stretch;flex-direction:column}
+ .pc-add-participant select{width:100%;max-width:none}
+}
+@media(max-width:390px){
+ .ux-count .pc-count-row .pc-count-open{gap:3px}
+ .ux-count .pc-count-row .pc-count-open span{font-size:10px}
+ .ux-count .pc-count-row .ux-stepper{gap:1px}
+ .ux-count .pc-count-row .ux-stepper button{width:30px}
+ .ux-count .pc-count-row .ux-stepper input{width:43px}
+ .pc-person-row>summary{grid-template-columns:80px minmax(0,1fr) 60px}
+}

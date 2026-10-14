@@ -1,4 +1,5 @@
 'use client';
+import {pcOperationalDate} from '@/lib/pc-date';
 
 import {useEffect,useState,type CSSProperties} from 'react';
 import {auth} from '@/lib/firebase';
@@ -18,7 +19,7 @@ function Gauge({value,label}:{value:number;label:string}){
 
 export function ManagementDashboard({data,lang,email,onRefresh,onLogout,showcase=false}:{data:ManagementData;lang:Lang;email?:string;onRefresh:()=>void;onLogout?:()=>void;showcase?:boolean}){
  const es=lang==='es';
- const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ const today=pcOperationalDate();
  const [from,setFrom]=useState(addDays(today,-29)),[to,setTo]=useState(today),[applied,setApplied]=useState({from:addDays(today,-29),to:today});
  const [filtered,setFiltered]=useState<ManagementData|null>(null),[filterError,setFilterError]=useState(''),[filterLoading,setFilterLoading]=useState(false);
  useEffect(()=>{
@@ -39,7 +40,7 @@ export function ManagementDashboard({data,lang,email,onRefresh,onLogout,showcase
  return <section className="mi-dashboard">
   <div className="mi-title-row"><div><p className="ux-eyebrow">MANAGEMENT INFORMATION</p><h1>{es?'Control de producción · KPIs':'Production Control · KPIs'}</h1><p className="ux-muted">{showcase?(es?'Indicadores derivados de conteos, producción, tiempos e insumos.':'Indicators derived from counts, production, time and inputs.'):(es?'Indicadores derivados de conteos, producción, tiempos e insumos. Sólo superadministradores.':'Indicators derived from counts, production, time and inputs. Super admins only.')}</p></div><div className="mi-admin-actions">{!showcase&&email?<small>{email}</small>:null}<button className="ux-secondary" onClick={onRefresh}>{es?'Actualizar':'Refresh'}</button>{!showcase&&onLogout?<button className="ux-secondary" onClick={onLogout}>{es?'Cerrar sesión':'Sign out'}</button>:null}</div></div>
 
-  {!showcase&&<div className="mi-period-filter"><label>{es?'KPIs desde':'KPIs from'}<input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label><label>{es?'Hasta':'To'}<input type="date" value={to} onChange={e=>setTo(e.target.value)}/></label><button type="button" className="ux-main-button" disabled={filterLoading||from>to} onClick={()=>{setFiltered(null);setApplied({from,to});}}>{filterLoading?'Filtrando…':es?'Aplicar periodo':'Apply period'}</button><span className="ux-muted">{filterLoading?'Actualizando datos…':`Periodo: ${applied.from} → ${applied.to}`}</span>{filterError&&<span role="alert" className="ux-muted">{filterError}</span>}</div>}
+  {!showcase&&<div className="mi-period-filter"><label>{es?'KPIs desde':'KPIs from'}<input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label><label>{es?'Hasta':'To'}<input type="date" value={to} onChange={e=>setTo(e.target.value)}/></label><button type="button" className="ux-main-button" disabled={filterLoading||from>to||Date.parse(to+'T12:00:00Z')-Date.parse(from+'T12:00:00Z')>90*86400000} onClick={()=>{setFiltered(null);setApplied({from,to});}}>{filterLoading?'Filtrando…':es?'Aplicar periodo':'Apply period'}</button><span className="ux-muted">{filterLoading?'Actualizando datos…':`Periodo: ${applied.from} → ${applied.to}`}</span>{filterError&&<span role="alert" className="ux-muted">{filterError}</span>}</div>}
   <div className="mi-kpis">
    <article><span>{es?'Cobertura de pares de conteo':'Count pair coverage'}</span><strong>{pct(shown.summary.countPairCompletionPct)}</strong><small>{shown.summary.completedCountPairs}/{shown.summary.observedCountDays} {es?'días observados completos':'observed days complete'}</small></article>
    <article><span>{es?'Producción terminada':'Completed production'}</span><strong>{num(shown.summary.outputKg,1)} kg</strong><small>{num(shown.summary.bagsProduced)} {es?'bolsas':'bags'} · {num(shown.summary.completedBatches)} {es?'lotes':'batches'}</small></article>

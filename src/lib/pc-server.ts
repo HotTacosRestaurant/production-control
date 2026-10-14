@@ -1,5 +1,6 @@
+import {pcOperationalDate} from './pc-date';
 import 'server-only';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,timingSafeEqual} from 'node:crypto';
 import {cert, getApps, initializeApp} from 'firebase-admin/app';
 import {getAuth} from 'firebase-admin/auth';
 import {FieldValue, getFirestore, type Firestore} from 'firebase-admin/firestore';
@@ -11,7 +12,7 @@ export const safeSite = (value: unknown): value is Site => typeof value === 'str
 export const validSites = (value: unknown): value is Site[] => Array.isArray(value) && value.length > 0 && value.length <= 3 && value.every(safeSite) && new Set(value).size === value.length;
 export const text = (value: unknown, max = 120) => typeof value === 'string' ? value.trim().slice(0, max) : '';
 export const validDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T12:00:00Z`)) && new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value;
-export const operationalToday = () => new Intl.DateTimeFormat('en-CA', {timeZone:'America/Toronto', year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date());
+export const operationalToday = () => pcOperationalDate();
 export const stamp = () => FieldValue.serverTimestamp();
 export const newId = () => randomUUID();
 
@@ -66,4 +67,23 @@ export async function findEmployee(id:unknown,site:Site){
 
 export async function audit(action:string,siteId:Site,operator:{id:string;name:string},details:Record<string,unknown>){
   await db().collection('pc_audit').add({action,siteId,actorId:operator.id,actorName:operator.name,details,createdAt:stamp()});
+}
+
+/** No code is required for regular kitchen operations. Corrections only. */
+export function requireCorrectionCode(value:unknown):void {
+ const configured=process.env.PC_CORRECTION_CODE;
+ if(!configured||configured.length<4)throw new Error('CORRECTION_CODE_NOT_CONFIGURED');
+ if(typeof value!=='string'||!value||value.length>128)throw new Error('CORRECTION_AUTH_REQUIRED');
+ const provided=Buffer.from(value,'utf8'), expected=Buffer.from(configured,'utf8');
+ if(provided.length!==expected.length||!timingSafeEqual(provided,expected))throw new Error('CORRECTION_AUTH_REQUIRED');
+}
+/** A viewer can access operational consultation but never KPI endpoints. */
+export async function requireOperationalViewer(request:Request):Promise<{uid:string;email:string}> {
+ requireSameOrigin(request);
+ const header=request.headers.get('authorization')??'';
+ if(!header.startsWith('Bearer '))throw new Error('ADMIN_AUTH_REQUIRED');
+ db();const decoded=await getAuth().verifyIdToken(header.slice(7).trim(),true);
+ const access=(await db().collection('portal_users').doc(decoded.uid).get()).data();
+ if(!access||access.active!==true||!['viewer','admin'].includes(access.role))throw new Error('FORBIDDEN');
+ return {uid:decoded.uid,email:typeof decoded.email==='string'?decoded.email:''};
 }

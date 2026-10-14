@@ -1,4 +1,5 @@
 'use client';
+import {pcOperationalDate} from '@/lib/pc-date';
 import {useEffect,useState} from 'react';
 import {auth} from '@/lib/firebase';
 import {addDays,type ForecastDay,type HistoryDay,type PlanRow} from '@/lib/pc-forecast';
@@ -6,7 +7,7 @@ import type {ReportPayload} from '@/lib/pc-reports-server';
 import type {ManagementData} from '@/lib/pc-management';
 import type {Site} from '@/lib/pc-types';
 type Lang='es'|'en';
-const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+const today=()=>pcOperationalDate();
 const number=(v:number|null|undefined)=>v===null||v===undefined?'—':new Intl.NumberFormat('es-CA',{maximumFractionDigits:2}).format(v);
 function HistoricalForecastChart({historic,future,min,max}:{historic:HistoryDay[];future:ForecastDay[];min:number|null;max:number|null}){
  const all=[...historic.map(d=>d.date),...future.map(d=>d.date)];

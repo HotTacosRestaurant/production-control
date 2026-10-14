@@ -1,90 +1,62 @@
-# Production Control — Reemplazos v1 · 11 octubre 2026
+# Production Control — Reemplazos completos · 14/oct/2026
 
-## Qué incluye
+Paquete preparado directamente desde `production-control copy(6).zip`. Conserva Next.js, Firebase, colecciones e IDs de registros existentes. **No es una versión probada contra la base Firestore real.** Primero probar en una rama y staging.
 
-Reemplazos basados en el ZIP `production-control copy(5).zip` (Next.js 16.3.8, Firebase Admin). No sobrescribe las colecciones antiguas ni requiere migración masiva.
+## Qué cambia
 
-**Cocina:** captura de bolsas enteras + kg de bolsa abierta; producción final en bolsas + excedente; cálculo de kg y bolsas equivalentes. Catálogo con proceso de preparación (copiado de ChatGPT), días de cobertura objetivo/mínima, lead time de producción, plazo de compra al proveedor, lote indivisible de materia prima, rendimiento esperado y materia prima principal. Vista del proceso en cada lote y conservación de snapshot. Conteos y correcciones con auditoría.
+1. **Salidas especiales:** opción adicional «Windsor». Se registra como salida del origen; **no crea una recepción automática** en Windsor.
+2. **Presentaciones:** productos terminados con `bagSize` + `bagUnit` (kg, g, lb, L, mL, piezas y porciones). Ejemplo: bolsa de 10 porciones: se cuentan 10 bolsas, y se conocen 100 porciones. Los productos previos sin esos campos siguen usando `bagWeightKg` en kg. Las unidades físicas incompatibles **no se suman entre sí**.
+3. **Consulta operativa:** nueva ruta `/consulta`, visible para usuarios de Firebase Authentication con `portal_users/{uid}` activo, `role: "viewer"` o `role: "admin"`. Muestra gráfica de bolsas por día, conteos, producción, ingredientes y salidas; no usa el endpoint de KPIs. El usuario `viewer` **no tiene acceso** a los endpoints de Management. La consulta se hace por periodo y sucursal.
+4. **Alta de productos:** permite una medida diferente de kg por bolsa y conserva la conversión opcional a kilogramos solo para presentaciones de masa. Los cálculos gerenciales **en kg** no representan porciones/piezas/litros; deben analizarse por unidad, no tratarse como cero kg de consumo real.
+5. **Producción:** campo «Fecha de producción» independiente de «Fecha del conteo».
+6. **Ingrediente:** el desplegable se cierra al seleccionar, al perder enfoque y al registrar.
+7. **Cierre de producción:** «Finalizar preparación» está disponible tanto en «Por producto» como en «Por persona»; registra bolsas terminadas y contenido extra en la unidad de producto. Requiere cronómetros pausados y un resultado positivo. Conserva snapshot de presentación en lotes nuevos.
+8. **Finalización única:** los lotes finalizados no muestran botón de finalizar y el backend bloquea un segundo cierre, usando transacción. Para cambiar el resultado terminado hay una corrección autorizada.
+9. **Producción por fecha:** las abiertas se muestran de forma independiente (incluidas pendientes anteriores) y las finalizadas se agrupan por día y se despliegan solo al pedirlo.
+10. **Conteos por fecha:** filas compactas apertura/cierre; «Sin registrar» para los días sin datos del periodo. Al registrar tarde se conserva fecha operativa, responsables y timestamp del servidor (`capturedAt`). No se crean registros falsos de «sin conteo».
+11. **Consultas limitadas:** cocina carga por defecto solo el día actual; para buscar un rango se seleccionan fechas **antes de pedir los datos**. Máximo 91 días inclusivos. Firestore aplica filtros por `operationalDate` antes de descargar, incluidos ingredientes, movimientos y actividades. Los lotes aún abiertos se recuperan aparte. Management usa un periodo inicial de 30 días y el endpoint rechaza consultas mayores de 91 días.
+12. **Correcciones:** sin firmas, con código de verificación del encargado, motivo, nombre de operador y revisiones anteriores en Firestore. Se aplica a conteo, insumos, producción final y cronómetros. **Nunca se pide este código para contar, preparar, registrar ingredientes o usar cronómetros normalmente**.
 
-**Inventarios:** nuevo registro sencillo de salidas especiales a Food Truck, catering, merma o ajuste. Estas salidas reducen existencias pero se excluyen del cálculo de DEMANDA ORDINARIA del producto.
+## Configuración antes de desplegar
 
-**Management:** filtro de periodo para KPIs; historia y baseline independientes; rangos excluidos; eventos y % de demanda adicional; bloqueos de producción por compras; línea histórica de apertura/cierre y forecast en kg; niveles mínimo/objetivo; tabla simulada de futuros lotes, cantidades, materia prima, horas y requerimientos estimados. Excel `.xlsx` multitabla con IDs, versión de esquema y actualización incremental por fecha.
+1. Guarda una copia del repositorio actual y un respaldo de Firestore. Prueba primero con datos no productivos.
+2. Reemplaza los archivos manteniendo las rutas exactas indicadas en `ARCHIVOS_MODIFICADOS.txt`. Los archivos existentes no incluidos no se sustituyen.
+3. En **Vercel → Production Control → Settings → Environment Variables** agrega `PC_CORRECTION_CODE` como **Secret** con un valor resistente a intentos de adivinación (recomendado 12+ caracteres). Añade el mismo valor a `.env.local` para pruebas locales (no publicar ni versionar el secreto). Redeploy después de cambiarlo.
+4. **NO** configures `PC_OPERATIONS_PIN`: ya no se utiliza; ni conteos ni producción requieren códigos.
+5. Para habilitar un usuario de consulta, crea su cuenta en **Firebase Authentication** y agrega/actualiza el documento `portal_users/{firebaseAuthUid}` con `active: true`, `role: "viewer"`. Hazlo con permisos administrativos. El superadmin mantiene su control actual con `role: "admin"` **y la lista de correos autorizados**. No se agregan cuentas automáticamente ni contraseñas al repositorio.
+6. No cambies indiscriminadamente las reglas de Firestore de otras aplicaciones. Las rutas del servidor usan Firebase Admin SDK, así que las reglas de cliente no suplen la autorización del servidor.
+7. Ejecuta en tu equipo: `npm ci`, `npm run lint`, `npm run build`; después valida en staging con un usuario de cocina y otro `viewer`. Realiza un despliegue sólo al aprobar las pruebas.
 
-**Showcase público:** indicadores, gráfica y forecast funcionales con datos demostrativos coherentes sin vínculos a registros privados reales.
+## Límites explícitos de seguridad
 
-## Antes de reemplazar (OBLIGATORIO)
+- La captura de cocina **es anónima** a nivel de inicio de sesión; el nombre seleccionado sirve para atribución operativa, **no es una identidad autenticada**.
+- El endpoint básico `/api/pc/snapshot` es accesible al personal sin cuenta, porque la cocina debe consultar el inventario actual e históricos seleccionados sin login. Por lo tanto, **la información operativa que puede leer cocina no es confidencial a nivel de API**. `/consulta` exige cuenta para dar una experiencia de supervisión; para que toda la historia operativa sea privada será necesario separar en el futuro el subconjunto público de cocina del API de supervisión.
+- La protección de **KPIs gerenciales** sí se aplica en servidor con Firebase Auth, allowlist de superadministradores y rol `admin`.
+- Correcciones requieren `PC_CORRECTION_CODE` validado en servidor; si falta, el endpoint devuelve error 503 y **no permite corregir**. Los registros normales siguen operando.
+- Por ahora no hay límite de intentos de código de corrección; se recomienda un secreto robusto, HTTPS y protección WAF/rate limiting desde Vercel.
 
-1. Confirmar que tu proyecto coincide con el ZIP usado. Respaldar la carpeta o crear rama de Git: `git switch -c backup/pre-production-planning` y regresar a tu rama de trabajo con `git switch main`.
-2. Hacer copia de las reglas actuales de Firestore y un respaldo/exportación de Firestore.
-3. Hacer pruebas primero en un entorno de staging y, preferentemente, un proyecto Firebase de prueba. No poner datos de clientes reales en el showcase.
-4. El ZIP contiene rutas RELATIVAS: copia las carpetas `src/` y los 3 `.md` de la carpeta REEMPLAZOS sobre la raíz del proyecto y acepta sobrescritura.
+## Compatibilidad y alcance
 
-## PASO 1: entorno (importante)
+- Se conservan registros previos y formatos antiguos `bagWeightKg`, `openKg`, `partialKg`, `outputKg` para cantidades de masa; las unidades nuevas utilizan `bagSize`, `bagUnit`, `openAmount`, `partialAmount` y `outputAmount`.
+- Los informes/KPIs heredados que se expresan en kg **no calculan rendimiento de porciones ni litros**. Los datos de ingredientes registrados siguen en sus unidades nativas. No se inventa un rendimiento numérico sumando agua, masa y piezas.
+- En consultas gerenciales y reportes por periodo, actividades/ingredientes **legacy sin campo `operationalDate`** pueden no aparecer hasta que se les añada ese campo con una migración verificada. Las consultas de lotes actuales sí utilizan los datos registrados con fecha.
+- Cualquier lote activo muy antiguo permanece en «En curso» hasta que sea finalizado/corregido; el backend limita a 60 lotes pendientes fuera del periodo. Si existe más carga acumulada que esa, conviene cerrar los lotes legítimamente y hacer limpieza supervisada.
+- La finalización se bloquea si un cronómetro aún corre. El aviso en la pantalla indica qué persona debe pausarlo; «Terminar mi tiempo» y «Finalizar preparación» son acciones distintas.
+- Firestore requiere índices automáticos de campos simples `operationalDate`, `status` y `batchId` (configuración predeterminada). No se añadieron consultas de múltiples campos que requieran índices compuestos.
 
-En Vercel > Proyecto Production Control > Settings > Environment Variables, agregar:
+## Pruebas mínimas antes del despliegue
 
-```
-PC_OPERATIONS_PIN = <código robusto de dispositivo, mínimo 8 caracteres>
-```
+1. Crear producto de 1 kg, otro de 5 lb, otro de bolsa con 10 porciones; guardar, editar y reabrir.
+2. Contar apertura/cierre por separado; verificar bolsas y subtotal por unidad sin mezclas.
+3. Registrar movimiento Windsor, comprobar sitio origen y cantidades.
+4. Crear lote, agregar ingrediente, iniciar cronómetro, intentar finalizar (debe advertir), pausar y finalizar en ambas vistas. Confirmar que no permite finalizar dos veces y que guarda cantidad final.
+5. Corregir una captura sin código y con código incorrecto (rechazo); con código correcto (revisión registrada).
+6. Buscar varios días sin registros: las fechas vacías deben aparecer; registrar posteriormente y comprobar quién capturó y `capturedAt` real del servidor.
+7. Comprobar que `/consulta` requiere usuario `viewer`/`admin`, que un `viewer` recibe 403 al solicitar Management, y que el superadmin sigue viendo KPIs.
+8. Revisar periodos y que ni `snapshot`, ni Management ni los reportes consulten las colecciones operativas completas, salvo catálogos y los lotes pendientes.
 
-Tipo **Secret**, al menos Production. NO incluir el valor en Git, en capturas ni en el chat. En local añadirlo a `.env.local` (archivo gitignored). En producción, si no se configura el PIN, los endpoints operativos devuelven **503** como medida de seguridad. Management sigue con Firebase + rol `portal_users/{uid}` (`role=admin`, `active=true`) y superadmin allow-list existente. El código no crea ni modifica ese rol.
+## Verificación ejecutada en este entorno
 
-El PIN se introduce una sola vez por sesión de pestaña; los cocineros siguen escogiendo su nombre para el registro de auditoría. No se requiere que cada persona gestione un correo o contraseña de Firebase. Para mayor control, aplicar rate limits/WAF al endpoint y usar HTTPS siempre.
-
-## PASO 2: reglas Firestore
-
-Abre `FIRESTORE_PRODUCTION_CONTROL.rules` incluido en este paquete.
-
-**Si Firebase es EXCLUSIVO de Production Control**, puedes usarlo como conjunto completo de reglas después de respaldar las anteriores.
-
-**Si comparte proyecto con cualquier otra PWA**, NO pegues el archivo completo ni borres los matches existentes. FUSIONA únicamente los matches `pc_*` y `portal_users` con las reglas originales. El archivo trae un `match /{document=**}` de denegación global que no se debe duplicar por encima de reglas de otras aplicaciones.
-
-`pc_movements` es una nueva colección y se crea con el primer registro. Firestore Rules NO limitan llamadas hechas con Firebase Admin; esa autorización está en `/api/pc/...` y por eso es obligatorio el PIN en producción.
-
-## PASO 3: validar y probar
-
-```powershell
-npm ci
-npx tsc --noEmit
-npm run lint
-npm run build
-npm run dev
-```
-
-No desplegar si falla cualquiera de las validaciones. Una vez iniciada la aplicación prueba:
-
-1. **Conteo:** 7 bolsas de 5 kg + 3 kg abiertos = **38 kg**. Guarda, carga, corrige kg abiertos y comprueba que se conserve la revisión.
-2. **Producción:** 2 bolsas de 5 kg + 2 kg excedentes = **12 kg** y **2.4 bolsas equivalentes**. Reabre el registro y verifica los KPIs de ese día.
-3. **Proceso:** pega pasos de preparación sin cantidades en Catálogo, abre un ciclo nuevo y comprueba «Ver proceso de preparación». El snapshot no se debe alterar si editas el catálogo después.
-4. **Salidas:** inventario apertura 38, cierre 31, salida especial 2 kg => consumo habitual calculado **5 kg**, no 7.
-5. **Forecast:** 14 días válidos de 5 kg/día, mínimo 3 días y objetivo 10 días => umbrales **15 y 50 kg**. Si un cordero entero de 30 kg rinde 70%, produce en **42 kg** al necesitar 35 kg; alcanza **57 kg** partiendo de 15.
-6. **Base/exclusiones:** elimina un intervalo de festividad solo del promedio, añade un +40% a fechas futuras, agrega bloqueo de compras y observa los cambios de la gráfica/tabla.
-7. **Rendimiento:** selecciona materia prima principal, captura kg y verifica rendimiento real; si falta insumo principal, «Sin datos».
-8. **Excel:** desde Management, genera reporte y pulsa «Descargar Excel»; comprueba que tenga manifest, inventory_counts, inventory_movements, production_batches, production_inputs, production_labor, daily_consumption, forecast_daily, production_plan y kpi_snapshot.
-9. **Celular:** iPhone 390 px: conteos, selector de empleados, campo kg abiertos, cierre de producción, procedimiento, tabla desplazable lateralmente. Management mantiene controles separados de captura del personal.
-10. **Showcase público:** `/showcase` debe mostrar gráficos, datos numéricos y tabla de escenario pero NO IDs reales, empleados ni resultados del cliente.
-
-## PASO 4: publicar
-
-```powershell
-git status
-git add src KPI-ACCESS-MATRIX.md KPI-DEFINITIONS-PRODUCTION-CONTROL.md SHOWCASE-DATA-CONTRACT.md
-git commit -m "feat: production weights, forecasting, Excel exports and demo showcase"
-git push origin main
-```
-
-Vercel hará su deploy si el repo está conectado. Confirmar READY y repetir las pruebas en production.
-
-## Data Mart incremental y evolución
-
-Excel tiene columnas y `schema_version=1`, IDs de entidades, timestamps y `manifest` con filtros y `updated_since`. Para PRIMERA extracción dejar watermark vacío. Para siguientes extracciones, utilizar el último watermark UTC con un solapamiento prudente y upsert por ID natural, no insertar a ciegas. El filtro incremental se aplica SOLO a las tablas fuente dentro del intervalo de fecha operativa seleccionado; las hojas de forecast/KPIs son snapshots del nuevo escenario. Para correcciones antiguas, vuelve a consultar la partición anual correspondiente. Las exportaciones de esta versión no emiten tombstones de borrados duros y no son aún un pipeline ETL programado. Nuevos campos deben agregarse de forma aditiva en futuras versiones, sin renombrar o borrar columnas existentes.
-
-## Alcance pendiente de integración
-
-* Los lotes proyectados son **simulaciones**, NO crean órdenes de compra, compromisos financieros ni producción aprobada.
-* Las cantidades de ingredientes previstos se extrapolan del histórico por unidad. Hasta tener recetas normalizadas son ESTIMACIONES que debe confirmar Compras.
-* Una salida hacia Food Truck reduce el inventario del origen; no registra aún una recepción validada en el destino. La recepción sigue dependiendo del conteo en Food Truck.
-* No hay conexión directa con ChatGPT: el proceso de preparación se redacta externamente y se pega en el catálogo.
-* La PWA puede procesar históricos que carecen de `openKg` o `partialKg` tratándolos como cero, sin reescribirlos.
-* Los intervalos de actividades/insumos legacy siguen resolviéndose a través de sus IDs de lote; mejorar la estrategia de consulta incremental antes de llegar a grandes volúmenes.
-* Se requiere probar en el Firebase/hosting real el circuito de red y permisos. La validación del paquete se efectuó sin arrancar el Next.js completo, porque no fue posible instalar las dependencias en este entorno.
+- Inspección de código y validación **sintáctica** de los archivos TypeScript/TSX con el compilador global de TypeScript.
+- Pruebas locales de conversiones y cantidades del módulo independiente de presentaciones.
+- **No** se pudo completar `npm ci` por restricciones de acceso al registro de paquetes; por tanto **no se ha ejecutado `npm run build` ni pruebas contra Firebase/Vercel**. La revisión sintáctica no sustituye a la compilación ni pruebas de integración.

@@ -1,0 +1,20 @@
+REEMPLAZOS V1 — rutas relativas a la raíz del repositorio
+
+src/app/page.tsx
+src/app/management-dashboard.tsx
+src/app/pc.css
+src/app/consulta/page.tsx                         NUEVO
+src/app/consulta/consulta.css                     NUEVO
+src/app/api/pc/[action]/route.ts
+src/app/api/pc/consultation/route.ts              NUEVO
+src/lib/pc-presentation.ts                        NUEVO
+src/lib/pc-server.ts
+src/lib/pc-reports-server.ts
+src/lib/pc-kpis-server.ts
+LEEME_INSTALACION.md
+KPI-ACCESS-MATRIX.md
+VERIFICACION_REALIZADA.txt
+ARCHIVOS_MODIFICADOS.txt                        NUEVO
+
+Los demás archivos del repositorio se conservan exactamente como en el ZIP original.
+Antes de desplegar leer LEEME_INSTALACION.md y definir PC_CORRECTION_CODE en Vercel.

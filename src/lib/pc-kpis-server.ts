@@ -73,8 +73,8 @@ export async function buildManagementData(filter?:{from?:string;to?:string}):Pro
  const [countSnap,batchSnap,activitySnap,inputSnap,moveSnap,productSnap]=await Promise.all([
   (filter?.from||filter?.to?store.collection('pc_counts').where('operationalDate','>=',filter.from??'2000-01-01').where('operationalDate','<=',filter.to??'2100-01-01'):store.collection('pc_counts')).get(),
   (filter?.from||filter?.to?store.collection('pc_batches').where('operationalDate','>=',filter.from??'2000-01-01').where('operationalDate','<=',filter.to??'2100-01-01'):store.collection('pc_batches')).get(),
-  store.collection('pc_activities').get(),
-  store.collection('pc_inputs').get(),
+  (filter?.from&&filter?.to?store.collection('pc_activities').where('operationalDate','>=',filter.from).where('operationalDate','<=',filter.to):store.collection('pc_activities')).get(),
+  (filter?.from&&filter?.to?store.collection('pc_inputs').where('operationalDate','>=',filter.from).where('operationalDate','<=',filter.to):store.collection('pc_inputs')).get(),
   (filter?.from||filter?.to?store.collection('pc_movements').where('operationalDate','>=',filter.from??'2000-01-01').where('operationalDate','<=',filter.to??'2100-01-01'):store.collection('pc_movements')).get(),
   store.collection('pc_products').where('kind','==','finished').get(),
  ]);

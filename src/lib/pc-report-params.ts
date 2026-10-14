@@ -1,7 +1,8 @@
+import {pcOperationalDate} from './pc-date';
 import {addDays,type ScenarioConfig,type DateRange} from './pc-forecast';
 import {validDate,safeSite} from './pc-server';
 export function getConfig(params:URLSearchParams):ScenarioConfig{
- const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Toronto',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+ const today=pcOperationalDate();
  const historyTo=params.get('to')??today,historyFrom=params.get('from')??addDays(historyTo,-29);
  const baseTo=params.get('baseTo')??historyTo,baseFrom=params.get('baseFrom')??historyFrom;
  const siteId=params.get('site')??'htw',productId=params.get('product')??'';
