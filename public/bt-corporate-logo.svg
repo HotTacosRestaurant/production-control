@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">BT Business Transformation</title>
+  <desc id="desc">Monograma corporativo BT en azul marino y blanco.</desc>
+  <rect width="64" height="64" rx="10" fill="#14283B"/>
+  <rect x="7" y="10" width="3" height="44" rx="1.5" fill="#567387"/>
+  <text
+    x="15"
+    y="43"
+    fill="#F4F6F7"
+    font-family="Arial, Helvetica, sans-serif"
+    font-size="31"
+    font-weight="800"
+    letter-spacing="-2"
+  >BT</text>
+</svg>
