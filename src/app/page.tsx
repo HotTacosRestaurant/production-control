@@ -99,7 +99,13 @@ export default function Home(){
  const refresh=useCallback(async()=>{try{const r=await api(`snapshot?site=${site}&from=${appliedFrom}&to=${appliedTo}`) as unknown as Data;setData({products:r.products||[],staff:r.staff||[],counts:r.counts||[],batches:r.batches||[],activities:r.activities||[],inputs:r.inputs||[],movements:r.movements||[]});setLoadError(false);}catch(e){setLoadError(true);throw e;}},[site,appliedFrom,appliedTo]);
  const loadManagement=useCallback(async(user:User)=>{setManagementLoading(true);try{const token=await user.getIdToken();const adminTo=today(),adminFrom=dateMinus(adminTo,29);const response=await fetch(`/api/pc/management?from=${adminFrom}&to=${adminTo}`,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'});const result=await response.json() as ManagementData&{error?:string};if(!response.ok)throw new Error(result.error||String(response.status));setManagement(result);}finally{setManagementLoading(false);}},[]);
  useEffect(()=>{let cancelled=false;void (async()=>{let preferred:Lang='es';try{if(localStorage.getItem('pc-locale')==='en')preferred='en';}catch{}let next=empty;let issue='';try{const r=await api(`snapshot?site=htl&from=${today()}&to=${today()}`) as unknown as Data;next={products:r.products||[],staff:r.staff||[],counts:r.counts||[],batches:r.batches||[],activities:r.activities||[],inputs:r.inputs||[],movements:r.movements||[]};}catch(e){issue=String(e);}return {preferred,next,issue};})().then(v=>{if(cancelled)return;setLang(v.preferred);setData(v.next);setMessage(v.issue);setLoadError(Boolean(v.issue));setReady(true);});return()=>{cancelled=true;};},[]);
- useEffect(()=>{if(ready)void refresh().catch(e=>setMessage(String(e)));},[ready,refresh]);
+ useEffect(()=>{
+  if(!ready)return;
+  const timer=window.setTimeout(()=>{
+   void refresh().catch(e=>setMessage(String(e)));
+  },0);
+  return()=>window.clearTimeout(timer);
+ },[ready,refresh]);
  useEffect(()=>{if(!auth)return;return onAuthStateChanged(auth,user=>{setAdminUser(user);const allowed=Boolean(user&&isSuperAdminEmail(user.email));setIsSuperAdmin(allowed);if(!allowed){managementAutoLoadUid.current=null;setManagement(null);setTab(current=>current==='management'?'home':current);}});},[]);
  useEffect(()=>{
   if(tab!=='management'||!isSuperAdmin||!adminUser||management||managementLoading)return;

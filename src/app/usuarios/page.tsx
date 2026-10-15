@@ -1,6 +1,7 @@
 'use client';
 
 import {useCallback,useEffect,useState,type FormEvent} from 'react';
+import Link from 'next/link';
 import {onAuthStateChanged,signInWithEmailAndPassword,signOut,type User} from 'firebase/auth';
 import {auth} from '@/lib/firebase';
 import {isSuperAdminEmail} from '@/lib/super-admin';
@@ -45,7 +46,7 @@ export default function Usuarios() {
   const [lastLoaded,setLastLoaded]=useState(false);
 
   useEffect(()=>{
-    if(!auth){setReady(true);return;}
+    if(!auth){const timer=window.setTimeout(()=>setReady(true),0);return()=>window.clearTimeout(timer);}
     return onAuthStateChanged(auth,account=>{
       setUser(account);setReady(true);setLastLoaded(false);setSetupLink('');
       if(!account)setViewers([]);
@@ -73,10 +74,12 @@ export default function Usuarios() {
   },[call]);
 
   useEffect(()=>{
-    if(user&&isSuperAdminEmail(user.email)&&!lastLoaded&&!loading)void refresh();
-  // Only refresh on account change; manual reloads use the Refresh button.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[user?.uid]);
+    if(!user||!isSuperAdminEmail(user.email))return;
+    // Load once when the authenticated account changes. The refresh button
+    // remains available for manual updates.
+    const timer=window.setTimeout(()=>{void refresh();},0);
+    return()=>window.clearTimeout(timer);
+  },[user,refresh]);
 
   const login=async(event:FormEvent<HTMLFormElement>)=>{
     event.preventDefault();setError('');setWorking(true);
@@ -131,7 +134,7 @@ export default function Usuarios() {
   return <main className="pc-users-page">
     <header className="pc-users-header">
       <div><p className="ux-eyebrow">HOT TACOS · PRODUCTION CONTROL</p><h1>Administrar usuarios de consulta</h1><p className="ux-muted">Solo superadministradores. Aquí no se crean administradores ni se modifican permisos del website.</p></div>
-      <div className="pc-users-nav"><a href="/">← Cocina / Management</a><a href="/consulta">Ir a Consulta</a></div>
+      <div className="pc-users-nav"><Link href="/">← Cocina / Management</Link><Link href="/consulta">Ir a Consulta</Link></div>
     </header>
     {!ready&&<p>Comprobando sesión…</p>}
     {ready&&!user&&<section className="pc-users-panel pc-users-login"><h2>Entrar como superadministrador</h2><form onSubmit={login} className="pc-users-form"><label>Correo<input type="email" required value={email} autoComplete="username" onChange={event=>setEmail(event.target.value)}/></label><label>Contraseña<input type="password" required value={password} autoComplete="current-password" onChange={event=>setPassword(event.target.value)}/></label><button className="ux-main-button" disabled={working}>Iniciar sesión</button></form></section>}

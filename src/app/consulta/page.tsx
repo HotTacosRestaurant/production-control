@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import {pcOperationalDate} from '@/lib/pc-date';
 import {useCallback,useEffect,useMemo,useState,type CSSProperties} from 'react';
 import {onAuthStateChanged,signInWithEmailAndPassword,signOut,type User} from 'firebase/auth';
@@ -70,7 +71,7 @@ export default function Consulta(){
  const [site,setSite]=useState('htl'),[from,setFrom]=useState(()=>shiftDay(nowDay(),-13)),[to,setTo]=useState(nowDay());
  const [data,setData]=useState<ResponseData|null>(null),[loading,setLoading]=useState(false),[exporting,setExporting]=useState<'xlsx'|'datamart'|null>(null),[onlySelected,setOnlySelected]=useState(false),[error,setError]=useState('');
  const [productId,setProductId]=useState(''),[mode,setMode]=useState<Mode>('historico');
- useEffect(()=>{if(!auth){setAuthReady(true);return;}return onAuthStateChanged(auth,u=>{setUser(u);setAuthReady(true);if(!u){setData(null);setProductId('');}});},[]);
+ useEffect(()=>{if(!auth){const timer=window.setTimeout(()=>setAuthReady(true),0);return()=>window.clearTimeout(timer);}return onAuthStateChanged(auth,u=>{setUser(u);setAuthReady(true);if(!u){setData(null);setProductId('');}});},[]);
  const load=useCallback(async()=>{
   if(!user){setError('Inicia sesión para consultar.');return;}
   setLoading(true);setError('');try{
@@ -106,7 +107,7 @@ export default function Consulta(){
  const selectedBatches=data?.batches.filter(b=>b.productId===productId&&b.operationalDate>=from&&b.operationalDate<=to)??[];
  const selectedMovements=data?.movements.filter(m=>m.productId===productId)??[];
  return <main className="pc-consulta">
-  <header className="pc-consulta-head"><div><p className="ux-eyebrow">HOT TACOS · PRODUCTION CONTROL</p><h1>Consulta operativa</h1><p className="ux-muted">Inventarios y producción por producto.</p></div><a href="/">← Cocina</a></header>
+  <header className="pc-consulta-head"><div><p className="ux-eyebrow">HOT TACOS · PRODUCTION CONTROL</p><h1>Consulta operativa</h1><p className="ux-muted">Inventarios y producción por producto. Sin KPIs de Management.</p></div><Link href="/">← Cocina</Link></header>
   {!authReady&&<p>Comprobando acceso…</p>}
   {authReady&&!user&&<section className="ux-paper pc-consulta-login"><h2>Acceso de consulta</h2><p>Tu cuenta debe estar habilitada con el rol <code>viewer</code> o <code>admin</code>.</p><form onSubmit={async e=>{e.preventDefault();if(!auth)return;setError('');try{await signInWithEmailAndPassword(auth,email,password);setPassword('');}catch(err){setError(err instanceof Error?err.message:String(err));}}}><label>Correo<input type="email" value={email} autoComplete="username" onChange={e=>setEmail(e.target.value)} required/></label><label>Contraseña<input type="password" value={password} autoComplete="current-password" onChange={e=>setPassword(e.target.value)} required/></label><button className="ux-main-button" type="submit">Entrar</button></form></section>}
   {user&&<>
