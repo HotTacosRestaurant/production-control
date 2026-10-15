@@ -56,7 +56,7 @@ export async function GET(request:NextRequest) {
   try {
     await requireSuperAdmin(request);
     const snap=await db().collection('portal_users').where('role','==','viewer').limit(200).get();
-    const viewers:ViewerRecord[]=snap.docs.map(doc=>{
+    const viewers:ViewerRecord[]=snap.docs.map<ViewerRecord>(doc=>{
       const d=doc.data();
       return {id:doc.id,email:String(d.email??''),name:String(d.name??''),active:d.active===true,role:'viewer'};
     }).sort((a,b)=>a.name.localeCompare(b.name,'es'));
