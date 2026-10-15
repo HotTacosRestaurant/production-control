@@ -1,8 +1,37 @@
-.pc-consulta{max-width:1200px;margin:0 auto;padding:20px;display:grid;gap:16px}
+.pc-consulta{max-width:1250px;margin:0 auto;padding:22px 18px 50px;display:grid;gap:16px}
 .pc-consulta-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.pc-consulta-head h1{font-size:30px;color:#193c58}.pc-consulta-head a{color:#235b7e;text-decoration:underline}
 .pc-consulta-login{max-width:520px}.pc-consulta-login form{display:grid;gap:12px}.pc-consulta-login label{display:grid;gap:5px}
-.pc-oper-chart{display:flex;gap:7px;overflow-x:auto;border-bottom:1px solid #dae6ef;align-items:flex-end;min-height:185px;padding:12px 4px 0}
-.pc-chart-day{display:grid;gap:6px;flex:1;min-width:42px;text-align:center}.pc-chart-day small{font-size:10px;color:#687d8f}
-.pc-chart-bars{height:145px;display:flex;align-items:flex-end;gap:3px}.pc-chart-bars i{display:block;min-height:1px;width:33%;background:#205d87;border-radius:3px 3px 0 0}.pc-chart-bars i:nth-child(2){background:#75acc7}.pc-chart-bars i:nth-child(3){background:#5b937a}
-.pc-chart-legend{font-size:12px;color:#466273}
-@media(max-width:620px){.pc-consulta{padding:12px}.pc-consulta-head{flex-direction:column}}
+.pc-consulta .pc-product-select{min-width:min(100%,300px);flex:1 1 270px}.pc-consulta .pc-product-select select,.pc-consulta .pc-period select{width:100%;min-height:43px;border:1px solid #c4d6e3;border-radius:9px;background:#fff;padding:9px;color:#25465e}
+.pc-consulta .pc-period label{min-width:120px}.pc-consulta .pc-period button{flex:0 0 auto}
+.pc-consulta .pc-chart-toolbar{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;margin:13px 0}
+.pc-consulta .pc-chart-toolbar p{font-size:12px}.pc-consulta .pc-chart-modes{display:flex;gap:4px;background:#eaf1f6;padding:4px;border-radius:10px}
+.pc-consulta .pc-chart-modes button{border:0;background:transparent;color:#365c75;border-radius:8px;padding:9px 14px;font-weight:700;min-height:38px}
+.pc-consulta .pc-chart-modes button.active{background:#fff;box-shadow:0 1px 6px #23456218;color:#194b6c}
+.pc-consulta .pc-chart-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:15px 0}
+.pc-consulta .pc-chart-stats>div{background:#f1f6fa;border:1px solid #e1eaf0;border-radius:11px;padding:12px;display:grid;gap:6px;min-width:0}
+.pc-consulta .pc-chart-stats small{color:#5c7285;font-size:12px}.pc-consulta .pc-chart-stats strong{font-size:19px;color:#1b4968;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.pc-consulta .pc-chart-scroll{overflow-x:auto;width:100%;border:1px solid #d8e5ec;border-radius:12px;background:#fff}
+.pc-consulta .pc-line-svg{height:320px;max-width:none;display:block;font-family:Arial,Helvetica,sans-serif}
+.pc-consulta .pc-line-svg text{fill:#647b8c;font-size:11px}.pc-consulta .pc-line-svg .pc-chart-grid{stroke:#e7edf2;stroke-width:1}
+.pc-consulta .pc-chart-legend{display:flex;flex-wrap:wrap;gap:10px 16px;margin:12px 0;font-size:12px;color:#405c70}
+.pc-consulta .pc-chart-legend span{display:inline-flex;align-items:center;gap:6px}
+.pc-consulta .pc-chart-legend i{display:inline-block;width:20px;height:3px;border-radius:2px;background:var(--swatch)}
+.pc-consulta .pc-chart-legend i.dashed{background:repeating-linear-gradient(90deg,var(--swatch) 0 6px,transparent 6px 10px)}
+.pc-consulta .pc-chart-warning{border-left:3px solid #c38c3b;background:#fff9ed;padding:10px 13px;border-radius:5px;font-size:12px;color:#745424;margin-top:7px}
+.pc-consulta .pc-chart-note{font-size:12px;line-height:1.5;color:#607789;margin-top:10px}
+.pc-consulta .pc-chart-empty{padding:34px 12px;text-align:center;color:#6a7f91}
+.pc-consulta .pc-chart-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.pc-consulta .pc-chart-actions button{min-height:40px}
+.pc-consulta .pc-consulta-subtitle{color:#5d7589;font-size:13px;margin:6px 0 12px}
+.pc-consulta .pc-table-scroll{max-width:100%}
+@media(max-width:800px){.pc-consulta .pc-chart-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.pc-consulta-head{flex-direction:column}}
+@media(max-width:520px){.pc-consulta{padding:12px}.pc-consulta .pc-chart-stats strong{font-size:16px}.pc-consulta .pc-chart-toolbar{align-items:stretch}.pc-consulta .pc-chart-modes{width:100%}.pc-consulta .pc-chart-modes button{flex:1}.pc-consulta .pc-period button{width:100%}}
+
+.pc-consulta .pc-export-panel{display:grid;gap:12px}
+.pc-consulta .pc-export-panel h2{margin:0}
+.pc-consulta .pc-export-choice{display:flex;align-items:center;gap:9px;cursor:pointer;font-size:14px;font-weight:500;color:#224b65}
+.pc-consulta .pc-export-choice input{width:17px;height:17px;accent-color:#215b7b}
+.pc-consulta .pc-export-buttons{display:flex;flex-wrap:wrap;gap:10px}
+.pc-consulta .pc-export-buttons button{min-height:43px;padding:10px 16px}
+.pc-consulta .pc-export-note{color:#637c8b;font-size:12px;line-height:1.5}
+@media(max-width:560px){.pc-consulta .pc-export-buttons button{width:100%}}

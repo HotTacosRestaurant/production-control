@@ -1,0 +1,30 @@
+.pc-users-page{max-width:1200px;margin:0 auto;padding:32px 24px 70px;color:#183653;font-family:Arial,Helvetica,sans-serif}
+.pc-users-header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:24px}
+.pc-users-header h1{font-size:clamp(1.45rem,2.8vw,2.15rem);margin:6px 0 9px;font-weight:600}
+.pc-users-nav{display:flex;gap:16px;flex-wrap:wrap;padding-top:14px}
+.pc-users-nav a{color:#225c85;text-decoration:underline}
+.pc-users-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0;flex-wrap:wrap}
+.pc-users-toolbar>div{display:flex;gap:8px}
+.pc-users-panel{background:#fff;border:1px solid #d5e0eb;border-radius:18px;padding:22px;margin-bottom:16px}
+.pc-users-panel h2{font-size:1.12rem;margin:0 0 12px}
+.pc-users-login{max-width:520px}
+.pc-users-form,.pc-users-create{display:grid;gap:12px}
+.pc-users-create{grid-template-columns:minmax(160px,1fr) minmax(200px,1.5fr) auto;align-items:end}
+.pc-users-form label,.pc-users-create label{display:grid;gap:6px;font-size:.9rem;font-weight:600}
+.pc-users-form input,.pc-users-create input,.pc-users-link input{width:100%;border:1px solid #c8d9e8;border-radius:10px;padding:13px;font-size:1rem;background:#fff;color:#183653;min-width:0}
+.pc-users-link{border-color:#d4dfbe;background:#f7fbf3}
+.pc-users-link-row{display:flex;gap:10px;margin:14px 0;align-items:center}
+.pc-users-link-row input{flex:1}
+.pc-users-section-title{display:flex;justify-content:space-between;gap:15px;align-items:center;flex-wrap:wrap}
+.pc-users-table-wrap{overflow-x:auto}
+.pc-users-table{width:100%;border-collapse:collapse;text-align:left;min-width:650px}
+.pc-users-table th,.pc-users-table td{border-bottom:1px solid #e4ecf4;padding:12px 10px;font-size:.93rem;vertical-align:middle}
+.pc-users-table th{background:#f3f7fa;color:#47647a}
+.pc-users-row-actions{display:flex;gap:7px;flex-wrap:wrap}
+.pc-users-row-actions button{padding:8px 11px;white-space:nowrap}
+.pc-users-active{color:#116c46;font-weight:700}
+.pc-users-inactive{color:#8d4c23;font-weight:700}
+.pc-users-notice,.pc-users-error{padding:14px 18px;border-radius:10px;margin:15px 0}
+.pc-users-notice{background:#e9f6ee;color:#15563d}
+.pc-users-error{background:#fff0ec;color:#8e3228}
+@media(max-width:760px){.pc-users-page{padding:18px 12px 45px}.pc-users-header{flex-direction:column}.pc-users-create{grid-template-columns:1fr}.pc-users-link-row{flex-direction:column;align-items:stretch}.pc-users-toolbar{align-items:flex-start}}
