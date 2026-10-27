@@ -157,11 +157,15 @@ export async function POST(req:NextRequest,context:Context){try{
   if(differs&&payload.confirmDifferentSigner!==true)throw new Error('SIGNER_MISMATCH');
   if(!Array.isArray(payload.lines)||payload.lines.length<1||payload.lines.length>100)throw new Error('INVALID_COUNT');
   const rows=payload.lines as CountLine[];
+  if(rows.some(row=>!row||typeof row.productId!=='string'||!/^[a-zA-Z0-9_-]{1,80}$/.test(row.productId)||!Number.isSafeInteger(row.bagCount)||row.bagCount<0||row.bagCount>100000))throw new Error('INVALID_COUNT');
   if(new Set(rows.map(r=>r.productId)).size!==rows.length)throw new Error('DUPLICATE_LINE');
+  // Fetch catalog references in one operation instead of one sequential Firestore read per product.
+  const productRefs=rows.map(row=>store.collection('pc_products').doc(row.productId));
+  const productDocs=await store.getAll(...productRefs);
   const lines=[];
-  for(const row of rows){
-   if(typeof row.productId!=='string'||!Number.isSafeInteger(row.bagCount)||row.bagCount<0||row.bagCount>100000)throw new Error('INVALID_COUNT');
-   const doc=await store.collection('pc_products').doc(row.productId).get();const p=doc.data();
+  for(let index=0;index<rows.length;index++){
+   const row=rows[index];
+   const doc=productDocs[index];const p=doc.data();
    if(!p||p.kind!=='finished'||!p.active||!validSites(p.siteIds)||!p.siteIds.includes(site))throw new Error('INVALID_PRODUCT');
    const pack=presentation(p);
    if(!Number.isFinite(pack.bagSize)||pack.bagSize<=0)throw new Error('INVALID_PRODUCT');
@@ -171,11 +175,17 @@ export async function POST(req:NextRequest,context:Context){try{
     openKg:asKg(openAmount,pack.bagUnit),totalKg:asKg(totalAmount,pack.bagUnit),bagWeightKgSnapshot:pack.bagWeightKg});
   }
   const id=`${site}_${date}_${period}`;
+  // Count and audit are committed atomically: avoid a saved count returning an error
+  // because a separate audit write failed afterwards. No client authentication required.
+  const countRef=store.collection('pc_counts').doc(id);
+  const auditRef=store.collection('pc_audit').doc();
   try{
-   await store.collection('pc_counts').doc(id).create({siteId:site,operationalDate:date,period,lines,employeeId:starter.id,employeeName:starter.name,startedById:starter.id,startedByName:starter.name,signedById:signer.id,signedByName:signer.name,signerMismatch:differs,isLateEntry:date<operationalToday(),capturedAt:stamp()});
+   const batch=store.batch();
+   batch.create(countRef,{siteId:site,operationalDate:date,period,lines,employeeId:starter.id,employeeName:starter.name,startedById:starter.id,startedByName:starter.name,signedById:signer.id,signedByName:signer.name,signerMismatch:differs,isLateEntry:date<operationalToday(),capturedAt:stamp()});
+   batch.create(auditRef,{action:'count.create',siteId:site,actorId:signer.id,actorName:signer.name,details:{id,startedById:starter.id,signedById:signer.id},createdAt:stamp()});
+   await batch.commit();
   }catch(e){if(e instanceof Error&&/ALREADY_EXISTS|already exists|6 /.test(e.message))throw new Error('CONFLICT');throw e;}
-  await audit('count.create',site,signer,{id,startedById:starter.id,signedById:signer.id});
-  return NextResponse.json({ok:true,id});
+  return NextResponse.json({ok:true,id},{headers:{'Cache-Control':'no-store'}});
  }
  if(action==='count-correct'){
   requireCorrectionCode(payload.verificationCode);
