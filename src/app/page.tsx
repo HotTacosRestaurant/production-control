@@ -30,8 +30,37 @@ const translations={
 } as const;
 const dateMinus=(date:string,days:number)=>new Date(Date.parse(date+'T12:00:00Z')-days*86400000).toISOString().slice(0,10);
 const today=()=>pcOperationalDate();
+// The open-bag quantity must remain strictly below one complete bag.
+// Store up to three decimals, consistently with pc-presentation.validPartial().
+function openBagMaximum(size:number,unit:string):number {
+ if(!Number.isFinite(size)||size<=0)return 0;
+ if(unit==='unit'||unit==='portion')return Math.max(0,Math.ceil(size)-1);
+ return Math.max(0,Number((size-0.001).toFixed(3)));
+}
+function openBagIncrement(size:number,unit:string):number {
+ if(unit==='unit'||unit==='portion')return 1;
+ return size<=0.2?0.001:size<=1?0.01:0.1;
+}
+function normalizeOpenBag(raw:string,previous:string|undefined,size:number,unit:string):string {
+ if(raw==='')return '';
+ const numeric=Number(raw);
+ const maximum=openBagMaximum(size,unit);
+ // Reject invalid input instead of silently inventing a quantity (e.g. 20 L -> 19.999 L).
+ if(!Number.isFinite(numeric)||numeric<0||numeric>maximum)return previous??'0';
+ if((unit==='unit'||unit==='portion')&&!Number.isInteger(numeric))return previous??'0';
+ // Keep the in-progress decimal text (e.g. "0.") while the user types.
+ return raw;
+}
+function finalizeOpenBag(raw:string|undefined,size:number,unit:string):string {
+ const value=Number(raw??0);
+ if(!Number.isFinite(value))return '0';
+ const maximum=openBagMaximum(size,unit);
+ const normalized=unit==='unit'||unit==='portion'?Math.floor(value):Math.round(value*1000)/1000;
+ return String(Math.min(maximum,Math.max(0,normalized)));
+}
 
-async function api(action:string,payload?:unknown):Promise<Record<string,unknown>> {
+
+async function api(action:string,payload?:unknown,signal?:AbortSignal):Promise<Record<string,unknown>> {
  const url=`/api/pc/${action}`;
  const isRead=payload===undefined;
  for(let attempt=0;attempt<(isRead?2:1);attempt++){
@@ -42,12 +71,14 @@ async function api(action:string,payload?:unknown):Promise<Record<string,unknown
     headers:isRead?undefined:{'Content-Type':'application/json'},
     cache:'no-store',
     credentials:'same-origin',
+    signal,
     body:isRead?undefined:JSON.stringify(payload),
    });
-  }catch{
+  }catch(error){
+   if(signal?.aborted)throw new Error('TIMEOUT: la API no respondió a tiempo. Si se trataba de un guardado, comprueba Firestore o el historial ANTES de intentarlo otra vez.');
    // Retry a transient network failure once on reads only, never on writes.
    if(isRead&&attempt===0){await new Promise<void>(resolve=>setTimeout(resolve,400));continue;}
-   throw new Error('No se pudo conectar con Production Control. Comprueba que el servidor siga encendido y vuelve a intentar. Si continúa, revisa la pestaña Network del navegador.');
+   throw new Error(`No se pudo conectar con Production Control: ${error instanceof Error?error.message:'Error de red'}. Comprueba la pestaña Network del navegador.`);
   }
   const result=await response.json().catch(()=>null) as Record<string,unknown>|null;
   if(!result){throw new Error(`La API respondió HTTP ${response.status} sin JSON válido. Revisa la terminal de Next.js.`);}
@@ -82,7 +113,7 @@ function StaffButtons({items,selected,onPick,onAdd,lang}:{items:Employee[];selec
 
 export default function Home(){
  const [lang,setLang]=useState<Lang>('es'),[tab,setTab]=useState<Tab>('home'),[site,setSite]=useState<Site>('htl'),[data,setData]=useState<Data>(empty),[ready,setReady]=useState(false),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[now,setNow]=useState(()=>Date.now());
- const [date,setDate]=useState(today()),[period,setPeriod]=useState<'opening'|'closing'>('opening'),[countStep,setCountStep]=useState<'when'|'who'|'bags'|'sign'>('when'),[startedBy,setStartedBy]=useState(''),[signedBy,setSignedBy]=useState(''),[counts,setCounts]=useState<Record<string,number>>({}),[openKg,setOpenKg]=useState<Record<string,string>>({});
+ const [date,setDate]=useState(today()),[period,setPeriod]=useState<'opening'|'closing'>('opening'),[countStep,setCountStep]=useState<'when'|'who'|'bags'|'review'>('when'),[startedBy,setStartedBy]=useState(''),[counts,setCounts]=useState<Record<string,number>>({}),[openKg,setOpenKg]=useState<Record<string,string>>({});
  const [catalogType,setCatalogType]=useState<'product'|'ingredient'|'staff'>('product'),[query,setQuery]=useState(''),[editing,setEditing]=useState<string|null>(null),[entryName,setEntryName]=useState(''),[entryWeight,setEntryWeight]=useState('5'),[entryPackUnit,setEntryPackUnit]=useState('kg'),[entryUnit,setEntryUnit]=useState('kg'),[entrySites,setEntrySites]=useState<Site[]>(['htl']),[entryActive,setEntryActive]=useState(true),[entryProcess,setEntryProcess]=useState(''),[entryTargetDays,setEntryTargetDays]=useState('10'),[entryMinDays,setEntryMinDays]=useState('3');
  const [view,setView]=useState<View>('product'),[expanded,setExpanded]=useState<string|null>(null),[creator,setCreator]=useState(''),[productToCreate,setProductToCreate]=useState(''),[endStaff,setEndStaff]=useState<Record<string,string>>({}),[endBags,setEndBags]=useState<Record<string,string>>({}),[endPartial,setEndPartial]=useState<Record<string,string>>({}),[ingredientQuery,setIngredientQuery]=useState(''),[ingredientFocused,setIngredientFocused]=useState(false),[unit,setUnit]=useState('kg'),[qty,setQty]=useState(''),[addingIngredient,setAddingIngredient]=useState(false);
  const [timerCorrection,setTimerCorrection]=useState<{batchId:string;employeeId:string;original:Array<{startedAt:string;stoppedAt:string|null}>}|null>(null);
@@ -91,6 +122,8 @@ export default function Home(){
  const [correction,setCorrection]=useState<{type:'count'|'input'|'output';id:string}|null>(null),[correctionLines,setCorrectionLines]=useState<Record<string,number>>({}),[correctionOpen,setCorrectionOpen]=useState<Record<string,string>>({}),[correctPartial,setCorrectPartial]=useState(''),[correctQty,setCorrectQty]=useState(''),[correctUnit,setCorrectUnit]=useState('kg'),[correctEmployee,setCorrectEmployee]=useState(''),[reason,setReason]=useState(''),[correctionCode,setCorrectionCode]=useState('');
  const [adminUser,setAdminUser]=useState<User|null>(null),[isSuperAdmin,setIsSuperAdmin]=useState(false),[adminLoginOpen,setAdminLoginOpen]=useState(false),[adminEmail,setAdminEmail]=useState(''),[adminPassword,setAdminPassword]=useState(''),[adminError,setAdminError]=useState(''),[management,setManagement]=useState<ManagementData|null>(null),[managementLoading,setManagementLoading]=useState(false);
  const [loadError,setLoadError]=useState(false);
+ const [countFeedback,setCountFeedback]=useState<{kind:'error'|'success'|'warning';text:string}|null>(null);
+ const countSubmitInFlight=useRef(false);
  const managementAutoLoadUid=useRef<string|null>(null);
  const [productionDate,setProductionDate]=useState(today());
  const [historyFrom,setHistoryFrom]=useState(today()),[historyTo,setHistoryTo]=useState(today()),[appliedFrom,setAppliedFrom]=useState(today()),[appliedTo,setAppliedTo]=useState(today());
@@ -131,8 +164,76 @@ export default function Home(){
  const changeSite=(next:Site)=>{setSite(next);setEntrySites([next]);resetCount();setExpanded('');setEditing(null);setTab('home');};
  const openAddEmployee=()=>{prepareCatalog('staff');setTab('catalog');};
  const employeeName=(id:string)=>staff.find(p=>p.id===id)?.name??id;
- const resetCount=()=>{setCountStep('when');setStartedBy('');setSignedBy('');setCounts({});setOpenKg({});};
+ const resetCount=()=>{setCountStep('when');setStartedBy('');setCounts({});setOpenKg({});};
+ const startNewCount=()=>{resetCount();setCountFeedback(null);};
  const countTotals={bags:finished.reduce((s,p)=>s+(counts[p.id]??0),0),summary:PACK_UNITS.map(u=>({unit:u.id,amount:finished.filter(p=>presentation(p).bagUnit===u.id).reduce((sum,p)=>{const pack=presentation(p);return sum+productQuantity(counts[p.id]??0,Number(openKg[p.id]??0),pack.bagSize);},0)})).filter(x=>x.amount>0).map(x=>quantityLabel(x.amount,x.unit)).join(' · ')||'0'};
+ // Validate against the server rules and explain which product prevents saving.
+ // A count with zero inventory IS valid; openAmount is only for part of ONE bag.
+ const countProblem=(()=>{
+  if(!startedBy)return lang==='es'?'Selecciona quién inició el conteo.':'Choose who started the count.';
+  if(existingCount)return lang==='es'?'Este conteo ya existe. Usa Corregir con autorización del encargado.':'This count already exists. Use the authorized correction action.';
+  if(!finished.length)return lang==='es'?'No hay productos terminados activos en esta sucursal.':'There are no active finished products in this location.';
+  if(finished.length>100)return lang==='es'?'Hay más de 100 productos activos. El servidor admite un máximo de 100 líneas por conteo.':'There are more than 100 active products; the server supports up to 100 count lines.';
+  for(const product of finished){
+   const pack=presentation(product);
+   if(!Number.isFinite(pack.bagSize)||pack.bagSize<=0||pack.bagSize>100000)return lang==='es'?`Catálogo: revisa la presentación de «${product.name}». Debe ser mayor que cero.`:`Catalog: check the bag size for “${product.name}”. It must be greater than zero.`;
+   const bags=counts[product.id]??0;
+   if(!Number.isSafeInteger(bags)||bags<0||bags>100000)return lang==='es'?`Revisa las bolsas de «${product.name}» (número entero entre 0 y 100000).`:`Check the number of bags for “${product.name}” (whole number from 0 to 100000).`;
+   const raw=openKg[product.id]??'0',partial=raw.trim()===''?0:Number(raw);
+   if(!Number.isFinite(partial)||partial<0)return lang==='es'?`Revisa la cantidad de bolsa abierta de «${product.name}».`:`Check the open bag amount for “${product.name}”.`;
+   if(partial>openBagMaximum(pack.bagSize,pack.bagUnit))return lang==='es'?`«${product.name}»: la bolsa abierta (${partial} ${packUnitLabel(pack.bagUnit)}) debe contener menos de ${pack.bagSize} ${packUnitLabel(pack.bagUnit)}. Si está completa, súmala a «Bolsas» y deja «Abierta» en 0.`:`“${product.name}”: the open bag (${partial} ${packUnitLabel(pack.bagUnit)}) must be smaller than ${pack.bagSize}. Count a full bag under “Bags” and set “Open” to 0.`;
+  }
+  return '';
+ })();
+ const submitCount=async()=>{
+  if(countSubmitInFlight.current)return;
+  if(countProblem){setCountFeedback({kind:'error',text:countProblem});return;}
+  const targetSite=site,targetDate=date,targetPeriod=period;
+  const id=`${targetSite}_${targetDate}_${targetPeriod}`;
+  const payload={siteId:targetSite,operationalDate:targetDate,period:targetPeriod,startedById:startedBy,signedById:startedBy,
+   confirmDifferentSigner:false,
+   lines:finished.map(p=>({productId:p.id,bagCount:counts[p.id]??0,openAmount:Number(finalizeOpenBag(openKg[p.id],presentation(p).bagSize,presentation(p).bagUnit))}))};
+  countSubmitInFlight.current=true;
+  setBusy(true);setCountFeedback(null);setMessage('');
+  let confirmedByWrite=false;
+  const controller=new AbortController();
+  const timeout=window.setTimeout(()=>controller.abort(),30000);
+  try{
+   const result=await api('count',payload,controller.signal);
+   if(result.ok!==true||result.id!==id)throw new Error('La API no confirmó el identificador del conteo.');
+   confirmedByWrite=true;
+   window.clearTimeout(timeout);
+   // The write was acknowledged. Never repeat the POST just because this read fails.
+   resetCount();
+   setHistoryFrom(targetDate);setHistoryTo(targetDate);
+   setAppliedFrom(targetDate);setAppliedTo(targetDate);
+   setCountFeedback({kind:'success',text:lang==='es'?`Conteo guardado en Firestore: ${id}.`: `Count saved in Firestore: ${id}.`});
+   // Confirm success immediately, before the secondary refresh (which can fail independently).
+   setBusy(false);
+   document.querySelector('.ux-count')?.scrollIntoView({behavior:'smooth',block:'start'});
+   const verifyController=new AbortController();
+   const verifyTimeout=window.setTimeout(()=>verifyController.abort(),12000);
+   try{
+    const checked=await api(`snapshot?site=${targetSite}&from=${targetDate}&to=${targetDate}`,undefined,verifyController.signal) as unknown as Data;
+    const saved=(checked.counts??[]).find(c=>c.id===id);
+    if(saved){
+     setData(previous=>({...previous,counts:[...previous.counts.filter(c=>c.id!==id),saved]}));
+    }else{
+     setCountFeedback({kind:'warning',text:lang==='es'?`El servidor confirmó la escritura (${id}), pero la consulta posterior aún no devuelve el registro. No lo vuelvas a capturar; consulta Firestore o actualiza el historial.`:`The server acknowledged the write (${id}), but the follow-up query did not show it. Do not submit it twice; check Firestore or refresh history.`});
+    }
+   }catch{
+    setCountFeedback({kind:'warning',text:lang==='es'?`El servidor confirmó que guardó ${id}, pero no se pudo actualizar el historial. NO repitas el guardado; utiliza «Consultar periodo» para comprobarlo.`:`The server confirmed ${id} was saved, but history could not reload. Do NOT submit it again; use “Consult period” to verify.`});
+   }finally{window.clearTimeout(verifyTimeout);}
+  }catch(error){
+   const detail=error instanceof Error?error.message:String(error);
+   const conflict=detail.includes('CONFLICT')||detail.includes('(409)');
+   setCountFeedback({kind:'error',text:conflict?(lang==='es'?`Ya existe un conteo para ${targetDate} (${targetPeriod==='opening'?'apertura':'cierre'}). No se sobrescribió. Consulta ese periodo y utiliza «Corregir» si es necesario.`:`A count already exists for ${targetDate}. Use the authorized correction action.`):(lang==='es'?`No se confirmó el guardado: ${detail}. Antes de intentarlo otra vez, comprueba el día en Firestore para evitar duplicados.`:`Save was not confirmed: ${detail}. Before retrying, check Firestore to avoid duplicate submissions.`)});
+   if(confirmedByWrite){
+    setCountFeedback({kind:'warning',text:lang==='es'?`El servidor confirmó ${id}, aunque hubo un problema posterior. No lo guardes otra vez.`:`The server confirmed ${id}, although a later step failed. Do not save again.`});
+   }
+  }finally{window.clearTimeout(timeout);countSubmitInFlight.current=false;setBusy(false);}
+ };
+
  const prepareCatalog=(kind:'product'|'ingredient'|'staff',item?:Product|Employee)=>{setCatalogType(kind);setEditing(item?.id??'new');setEntryName(item?.name??'');setEntrySites(item?.siteIds??[site]);setEntryActive(item?.active??true);if(item&&isProduct(item)){setEntryWeight(String(presentation(item).bagSize||5));setEntryPackUnit(presentation(item).bagUnit);setEntryUnit(item.defaultUnit??'kg');setEntryProcess(item.preparationProcess??'');setEntryTargetDays(String(item.targetDays??10));setEntryMinDays(String(item.minDays??3));}else{setEntryWeight('5');setEntryPackUnit('kg');setEntryUnit('kg');setEntryProcess('');setEntryTargetDays('10');setEntryMinDays('3');}};
  const submitCatalog=async()=>{const common={siteId:site,kind:catalogType==='staff'?'staff':'product',id:editing==='new'?undefined:editing,name:catalogType==='ingredient'?entryName.trim().toUpperCase():entryName.trim(),siteIds:editing==='new'?[site]:entrySites,active:entryActive};await save('catalog',catalogType==='staff'?common:{...common,productKind:catalogType==='ingredient'?'ingredient':'finished',bagSize:catalogType==='ingredient'?null:Number(entryWeight),bagUnit:catalogType==='ingredient'?null:entryPackUnit,defaultUnit:catalogType==='ingredient'?entryUnit:null,preparationProcess:entryProcess,targetDays:Number(entryTargetDays),minDays:Number(entryMinDays)},()=>setEditing(null));};
  const openCorrection=(type:'count'|'input'|'output',id:string)=>{setCorrection({type,id});setReason('');setCorrectEmployee('');setCorrectionCode('');const count=data.counts.find(c=>c.id===id);if(type==='count'&&count){setCorrectionLines(Object.fromEntries(count.lines.map(l=>[l.productId,l.bagCount])));setCorrectionOpen(Object.fromEntries(count.lines.map(l=>[l.productId,String(l.openAmount??l.openKg??0)])));}const input=data.inputs.find(i=>i.id===id);if(type==='input'&&input){setCorrectQty(String(input.quantity));setCorrectUnit(input.unit);}const batch=data.batches.find(b=>b.id===id);if(type==='output'&&batch){setCorrectQty(String(batch.bagCount??0));setCorrectPartial(String(batch.partialAmount??batch.partialKg??0));}};
@@ -228,30 +329,37 @@ export default function Home(){
  }
  if(!ready)return <main className="ux-loading">Loading / Cargando…</main>;
  return <div className="ux-app"><header className="ux-header"><button className="ux-logo" onClick={()=>setTab('home')}>BT <span>Production Control</span></button><div className="ux-settings"><select className="ux-branch-label" aria-label={t.branch} value={site} onChange={e=>changeSite(e.target.value as Site)}>{locations.map(l=><option key={l.id} value={l.id}>{l.name.toUpperCase()} · {l.id.toUpperCase()}</option>)}</select><a className="pc-consulta-link" href="/consulta">Consulta</a><button type="button" className="ux-admin-button" onClick={()=>{if(isSuperAdmin)setTab('management');else{setAdminError('');setAdminLoginOpen(true);}}}>{isSuperAdmin?(lang==='es'?'KPIs':'KPIs'):(lang==='es'?'Management':'Management')}</button><label>{t.lang}<select value={lang} onChange={e=>{const v=e.target.value as Lang;setLang(v);try{localStorage.setItem('pc-locale',v);}catch{}}}><option value="es">Español</option><option value="en">English</option></select></label></div></header><nav className="ux-nav"><button className={tab==='home'?'active':''} onClick={()=>setTab('home')}>{t.home}</button><button className={tab==='counts'?'active':''} onClick={()=>setTab('counts')}>{t.count}</button><button className={tab==='production'?'active':''} onClick={()=>setTab('production')}>{t.myWork}</button><button className={tab==='catalog'?'active':''} onClick={()=>setTab('catalog')}>{t.manage}</button>{isSuperAdmin&&<button className={tab==='management'?'active':''} onClick={()=>setTab('management')}>KPIs</button>}</nav> <main className="ux-main">{message&&<div className="ux-message" role="status"><span>{message}</span><div className="ux-message-actions">{loadError&&<button type="button" className="ux-retry" onClick={()=>void refresh().then(()=>setMessage('')).catch(e=>setMessage(String(e)))}>{lang==='es'?'↻ Reintentar carga':'↻ Retry loading'}</button>}<button type="button" aria-label={lang==='es'?'Cerrar mensaje':'Dismiss message'} onClick={()=>setMessage('')}>×</button></div></div>}
- {tab==='home'&&<section className="ux-welcome"><p className="ux-eyebrow">HOT TACOS · {locations.find(l=>l.id===site)?.name}</p><h1>{t.hello}</h1><p className="ux-muted">{t.subtitle}</p><div className="ux-tiles"><button onClick={()=>{resetCount();setTab('counts');}}><span className="ux-tile-icon">▤</span><strong>{t.count}</strong><small>{t.countDesc}</small><span className="ux-arrow">→</span></button><button onClick={()=>setTab('production')}><span className="ux-tile-icon">◷</span><strong>{t.cook}</strong><small>{t.cookDesc}</small><span className="ux-arrow">→</span></button></div><button className="ux-manage-link" onClick={()=>setTab('catalog')}>⚙ {t.manage} · {t.manageDesc} →</button></section>}
- {tab==='counts'&&<section className="ux-count"><div className="ux-section-head"><div><p className="ux-eyebrow">{t.count}</p><h1>{countStep==='when'?t.when:countStep==='who'?t.who:countStep==='bags'?t.countProducts:t.sign}</h1></div><button className="ux-secondary" onClick={resetCount}>{t.cancel}</button></div>
+ {tab==='home'&&<section className="ux-welcome"><p className="ux-eyebrow">HOT TACOS · {locations.find(l=>l.id===site)?.name}</p><h1>{t.hello}</h1><p className="ux-muted">{t.subtitle}</p><div className="ux-tiles"><button onClick={()=>{startNewCount();setTab('counts');}}><span className="ux-tile-icon">▤</span><strong>{t.count}</strong><small>{t.countDesc}</small><span className="ux-arrow">→</span></button><button onClick={()=>setTab('production')}><span className="ux-tile-icon">◷</span><strong>{t.cook}</strong><small>{t.cookDesc}</small><span className="ux-arrow">→</span></button></div><button className="ux-manage-link" onClick={()=>setTab('catalog')}>⚙ {t.manage} · {t.manageDesc} →</button></section>}
+ {tab==='counts'&&<section className="ux-count"><div className="ux-section-head"><div><p className="ux-eyebrow">{t.count}</p><h1>{countStep==='when'?t.when:countStep==='who'?t.who:countStep==='bags'?t.countProducts:(lang==='es'?'Revisar y guardar':'Review and save')}</h1></div><button className="ux-secondary" onClick={startNewCount}>{t.cancel}</button></div>
+ {countFeedback&&countStep!=='review'&&<div role="status" aria-live="polite" className={`pc-count-feedback pc-count-feedback-${countFeedback.kind}`}><strong>{countFeedback.kind==='success'?'✓ ':countFeedback.kind==='warning'?'⚠ ':'! '}{countFeedback.kind==='success'?(lang==='es'?'Guardado confirmado':'Save confirmed'):countFeedback.kind==='warning'?(lang==='es'?'Verificación pendiente':'Verification pending'):(lang==='es'?'Revisa el conteo':'Review count')}</strong><p>{countFeedback.text}</p></div>}
  {countStep==='when'&&<div className="ux-paper"><div className="ux-big-choices"><button className={period==='opening'?'selected':''} onClick={()=>setPeriod('opening')}><span>☀</span><strong>{t.opening}</strong></button><button className={period==='closing'?'selected':''} onClick={()=>setPeriod('closing')}><span>☾</span><strong>{t.closing}</strong></button></div><label className="ux-date-label">{t.date}<input type="date" value={date} max={today()} onChange={e=>setDate(e.target.value)}/></label>{existingCount&&<div className="ux-duplicate"><strong>{lang==='es'?'Ya se registró este conteo.':'This count is already recorded.'}</strong><span>{existingCount.startedByName} → {existingCount.signedByName} · {existingCount.lines.reduce((sum,line)=>sum+line.bagCount,0)} {t.bags}</span><button className="ux-secondary" type="button" onClick={()=>openCorrection('count',existingCount.id)}>{lang==='es'?'Ver / corregir registro':'View / correct count'}</button></div>}<button className="ux-main-button" disabled={!finished.length||!staff.length||Boolean(existingCount)} onClick={()=>setCountStep('who')}>{t.next} →</button>{!finished.length&&<p className="ux-muted">{t.noProducts}</p>}{!staff.length&&<p className="ux-muted">{t.noStaff}</p>}</div>}
- {countStep==='who'&&<div className="ux-paper"><p className="ux-muted">{t.choose}</p><StaffButtons items={staff} selected={startedBy} onPick={id=>{setStartedBy(id);setSignedBy(id);}} onAdd={openAddEmployee} lang={lang}/><div className="ux-bottom"><button className="ux-secondary" onClick={()=>setCountStep('when')}>{t.back}</button><button className="ux-main-button" disabled={!startedBy} onClick={()=>setCountStep('bags')}>{t.next} →</button></div></div>}
+ {countStep==='who'&&<div className="ux-paper"><p className="ux-muted">{t.choose}</p><StaffButtons items={staff} selected={startedBy} onPick={setStartedBy} onAdd={openAddEmployee} lang={lang}/><div className="ux-bottom"><button className="ux-secondary" onClick={()=>setCountStep('when')}>{t.back}</button><button className="ux-main-button" disabled={!startedBy} onClick={()=>setCountStep('bags')}>{t.next} →</button></div></div>}
  {countStep==='bags'&&<div className="ux-paper pc-count-paper">
   <div className="ux-context">{date} · {period==='opening'?t.opening:t.closing} · {employeeName(startedBy)}</div>
-  <div className="pc-count-head" aria-hidden="true"><span>{t.product}</span><span>{t.bags}</span><span>{lang==='es'?'Bolsa abierta':'Open bag'}</span><span>{t.total}</span></div>
+  <div className="pc-count-head" aria-hidden="true"><span>{t.product}</span><span>{t.bags}</span><span>{lang==='es'?'Bolsa abierta (< 1 bolsa)':'Open bag (< 1 bag)'}</span><span>{t.total}</span></div>
   <div className="ux-bag-list pc-count-table">{finished.map(p=>{
    const pack=presentation(p);
    return <div className="ux-bag-row pc-count-row" key={p.id}>
     <div className="ux-bag-name"><strong>{p.name}</strong><small>{pack.bagSize} {packUnitLabel(pack.bagUnit)}/{t.bags}</small></div>
     <div className="ux-stepper"><button type="button" aria-label={`${lang==='es'?'Restar':'Subtract'} ${p.name}`} onClick={()=>setCounts(q=>({...q,[p.id]:Math.max(0,(q[p.id]??0)-1)}))}>−</button><input type="number" min="0" step="1" inputMode="numeric" aria-label={`${p.name}: ${t.bags}`} value={counts[p.id]??0} onChange={e=>setCounts(q=>({...q,[p.id]:Math.max(0,Math.floor(Number(e.target.value)||0))}))}/><button type="button" aria-label={`${lang==='es'?'Agregar':'Add'} ${p.name}`} onClick={()=>setCounts(q=>({...q,[p.id]:(q[p.id]??0)+1}))}>+</button></div>
-    <label className="ux-partial pc-count-open"><span>{lang==='es'?'Abierta':'Open'} ({packUnitLabel(pack.bagUnit)})</span><input aria-label={`${p.name}: ${lang==='es'?'contenido de bolsa abierta':'open bag contents'} (${packUnitLabel(pack.bagUnit)})`} type="number" inputMode="decimal" min="0" max={pack.bagSize} step="any" value={openKg[p.id]??'0'} onChange={e=>setOpenKg(v=>({...v,[p.id]:e.target.value}))}/></label>
+    <label className="ux-partial pc-count-open"><span>{lang==='es'?'Abierta':'Open'} (&lt; {pack.bagSize} {packUnitLabel(pack.bagUnit)})</span><input aria-label={`${p.name}: ${lang==='es'?'contenido de bolsa abierta':'open bag contents'} (${packUnitLabel(pack.bagUnit)})`} type="number" inputMode="decimal" min="0" max={openBagMaximum(pack.bagSize,pack.bagUnit)} step={openBagIncrement(pack.bagSize,pack.bagUnit)} value={openKg[p.id]??'0'} onChange={e=>setOpenKg(v=>({...v,[p.id]:normalizeOpenBag(e.target.value,v[p.id],pack.bagSize,pack.bagUnit)}))} onBlur={()=>setOpenKg(v=>({...v,[p.id]:finalizeOpenBag(v[p.id],pack.bagSize,pack.bagUnit)}))}/></label>
     <b className="pc-count-amount">{quantityLabel(productQuantity(counts[p.id]??0,Number(openKg[p.id]??0),pack.bagSize),pack.bagUnit)}</b>
    </div>;
   })}</div>
   <div className="ux-total pc-count-total"><span>{countTotals.bags} {t.bags}</span><strong>{countTotals.summary}</strong></div>
-  <div className="ux-bottom"><button className="ux-secondary" onClick={()=>setCountStep('who')}>{t.back}</button><button className="ux-main-button" onClick={()=>setCountStep('sign')}>{t.review} →</button></div>
+  <div className="ux-bottom"><button className="ux-secondary" onClick={()=>setCountStep('who')}>{t.back}</button><button className="ux-main-button" onClick={()=>setCountStep('review')}>{t.review} →</button></div>
  </div>}
- {countStep==='sign'&&<div className="ux-paper"><div className="ux-review"><b>{date} · {period==='opening'?t.opening:t.closing}</b><strong>{countTotals.bags} {t.bags} · {countTotals.summary}</strong><span>{t.remember}</span></div><p className="ux-muted">{t.choose}</p><StaffButtons items={staff} selected={signedBy} onPick={setSignedBy} onAdd={openAddEmployee} lang={lang}/>{signedBy!==startedBy&&signedBy&&<div className="ux-warning">{t.signedWarning} ({employeeName(startedBy)} → {employeeName(signedBy)})</div>}<div className="ux-bottom"><button className="ux-secondary" onClick={()=>setCountStep('bags')}>{t.back}</button><button className="ux-main-button" disabled={busy||!signedBy||Boolean(existingCount)||finished.some(p=>!Number.isFinite(Number(openKg[p.id]??0))||Number(openKg[p.id]??0)<0||Number(openKg[p.id]??0)>=presentation(p).bagSize)} onClick={()=>void save('count',{siteId:site,operationalDate:date,period,startedById:startedBy,signedById:signedBy,confirmDifferentSigner:startedBy!==signedBy,lines:finished.map(p=>({productId:p.id,bagCount:counts[p.id]??0,openAmount:Number(openKg[p.id]??0)}))},resetCount)}>{t.save} ✓</button></div></div>}
+ {countStep==='review'&&<div className="ux-paper">
+  <div className="ux-review"><b>{date} · {period==='opening'?t.opening:t.closing}</b><strong>{countTotals.bags} {t.bags} · {countTotals.summary}</strong><span>{t.remember}</span></div>
+  <p className="ux-muted">{lang==='es'?'Responsable del conteo:':'Counted by:'} <strong>{employeeName(startedBy)}</strong>. {lang==='es'?'Guardar concluye el conteo; no requiere otra firma ni acceso.':'Saving completes the count; no additional signature or login is needed.'}</p>
+  {countProblem&&<p className="pc-count-validation" role="alert">{countProblem}</p>}
+  {countFeedback&&<div role="status" aria-live="polite" className={`pc-count-feedback pc-count-feedback-${countFeedback.kind}`}><strong>{countFeedback.kind==='error'?(lang==='es'?'No se pudo confirmar el guardado':'Could not confirm save'):(lang==='es'?'Aviso del servidor':'Server notice')}</strong><p>{countFeedback.text}</p></div>}
+  <div className="ux-bottom"><button type="button" className="ux-secondary" onClick={()=>setCountStep('bags')} disabled={busy}>{t.back}</button><button type="button" className="ux-main-button" disabled={busy||Boolean(countProblem)} onClick={()=>void submitCount()}>{busy?(lang==='es'?'Guardando…':'Saving…'):t.save}</button></div>
+ </div>}
  <section className="ux-history">
   <h2>{lang==='es'?'Conteos por fecha':'Daily counts'} <span>{history.length} {lang==='es'?'registros':'records'}</span></h2>
   <div className="pc-period"><label>Desde<input type="date" value={historyFrom} max={today()} onChange={e=>setHistoryFrom(e.target.value)}/></label><label>Hasta<input type="date" value={historyTo} max={today()} onChange={e=>setHistoryTo(e.target.value)}/></label><button className="ux-main-button" type="button" disabled={busy||historyFrom>historyTo||historyTo>today()||Date.parse(historyTo+'T12:00:00Z')-Date.parse(historyFrom+'T12:00:00Z')>90*86400000} onClick={()=>{setAppliedFrom(historyFrom);setAppliedTo(historyTo);}}>Consultar periodo</button></div>
-  <div className="pc-table-scroll"><table className="pc-compact-table"><thead><tr><th>Fecha</th><th>Apertura</th><th>Cierre</th></tr></thead><tbody>{groupedCounts.map(g=><tr key={g.day}><th>{g.day}</th>{([g.opening,g.closing] as const).map((c,i)=><td key={i}>{c?<details className="pc-row-detail"><summary><strong>✓ {c.lines.reduce((sum,l)=>sum+l.bagCount,0)} bolsas</strong>{c.isLateEntry&&<small> · Tardío</small>}</summary><div>{c.startedByName} → {c.signedByName}</div><div>Capturado: {stamped(c.capturedAt)}</div><div>{c.lines.map(l=><div key={l.productId}>{l.productName}: {l.bagCount} bolsas ({quantityLabel(l.totalAmount??l.bagCount*(l.bagSizeSnapshot??l.bagWeightKgSnapshot??0)+(l.openKg??0),l.quantityUnit??l.bagUnitSnapshot??'kg')})</div>)}</div><button className="ux-link" onClick={()=>openCorrection('count',c.id)}>{t.correct}</button></details>:<button className="ux-link pc-missing" onClick={()=>{setDate(g.day);setPeriod(i===0?'opening':'closing');resetCount();}}>— Sin registrar · Añadir</button>}</td>)}</tr>)}</tbody></table></div>
+  <div className="pc-table-scroll"><table className="pc-compact-table"><thead><tr><th>Fecha</th><th>Apertura</th><th>Cierre</th></tr></thead><tbody>{groupedCounts.map(g=><tr key={g.day}><th>{g.day}</th>{([g.opening,g.closing] as const).map((c,i)=><td key={i}>{c?<details className="pc-row-detail"><summary><strong>✓ {c.lines.reduce((sum,l)=>sum+l.bagCount,0)} bolsas</strong>{c.isLateEntry&&<small> · Tardío</small>}</summary><div>{c.startedByName} → {c.signedByName}</div><div>Capturado: {stamped(c.capturedAt)}</div><div>{c.lines.map(l=><div key={l.productId}>{l.productName}: {l.bagCount} bolsas ({quantityLabel(l.totalAmount??l.bagCount*(l.bagSizeSnapshot??l.bagWeightKgSnapshot??0)+(l.openKg??0),l.quantityUnit??l.bagUnitSnapshot??'kg')})</div>)}</div><button className="ux-link" onClick={()=>openCorrection('count',c.id)}>{t.correct}</button></details>:<button className="ux-link pc-missing" onClick={()=>{setDate(g.day);setPeriod(i===0?'opening':'closing');startNewCount();}}>— Sin registrar · Añadir</button>}</td>)}</tr>)}</tbody></table></div>
  </section>
  <details className="ux-process ux-movement"><summary>{lang==='es'?'Registrar salida especial (Food Truck, catering o merma)':'Register special usage (Food Truck, catering or waste)'}</summary><p className="ux-muted">{lang==='es'?'Solo cuando exista una salida extraordinaria. Se descuenta del consumo habitual al calcular pronósticos.':'Only for exceptional outgoing inventory. Kept separate from routine demand.'}</p><div className="ux-quick-form">
  <label>{t.product}<select value={moveProduct} onChange={e=>setMoveProduct(e.target.value)}><option value="">—</option>{finished.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
@@ -316,6 +424,45 @@ export default function Home(){
   {timerCorrectionError&&<p role="alert" style={{color:'#a12626',fontSize:13,fontWeight:700}}>{timerCorrectionError}</p>}
   <div className="ux-bottom"><button type="button" className="ux-secondary" onClick={()=>setTimerCorrection(null)}>{t.cancel}</button><button type="button" className="ux-main-button" disabled={busy||!correctionCode} onClick={()=>void submitTimerCorrection()}>{busy?'Guardando…':t.saveChange}</button></div>
  </section></div>}
- {correction&&<div className="ux-overlay" role="presentation"><section className="ux-modal" role="dialog" aria-modal="true" aria-label={t.correct}><div className="ux-modal-head"><h2>{t.correct}</h2><button className="ux-secondary" onClick={()=>setCorrection(null)}>×</button></div><p className="ux-muted">{t.reviewCorrection}</p>{correction.type==='count'&&data.counts.find(x=>x.id===correction.id)?.lines.map(l=><label className="ux-correct-row" key={l.productId}><span>{l.productName} · {l.bagSizeSnapshot??l.bagWeightKgSnapshot} {packUnitLabel(l.bagUnitSnapshot??'kg')}/{t.bags}</span><input type="number" min="0" step="1" inputMode="numeric" value={correctionLines[l.productId]??l.bagCount} onChange={e=>setCorrectionLines(s=>({...s,[l.productId]:Math.max(0,Math.floor(Number(e.target.value)||0))}))}/><span>{lang==='es'?`Contenido abierto (${packUnitLabel(l.bagUnitSnapshot??'kg')})`:'Open bag amount'}</span><input type="number" min="0" step="0.1" inputMode="decimal" value={correctionOpen[l.productId]??String(l.openAmount??l.openKg??0)} onChange={e=>setCorrectionOpen(s=>({...s,[l.productId]:e.target.value}))}/></label>)}{correction.type!=='count'&&<div className="ux-correction-fields"><label>{correction.type==='output'?t.produced:t.amount}<input type="number" min={correction.type==='output'?'0':'0.001'} step={correction.type==='output'?'1':'any'} value={correctQty} onChange={e=>setCorrectQty(e.target.value)}/></label>{correction.type==='output'&&<label>{lang==='es'?'Contenido adicional de bolsa':'Additional bag contents'}<input type="number" min="0" step="0.1" value={correctPartial} onChange={e=>setCorrectPartial(e.target.value)}/></label>}{correction.type==='input'&&<label>{t.unit}<select value={correctUnit} onChange={e=>setCorrectUnit(e.target.value)}>{PC_UNITS.map(u=><option key={u.id} value={u.id}>{lang==='es'?u.es:u.en}</option>)}</select></label>}</div>}<label>{t.corrector}<select value={correctEmployee} onChange={e=>setCorrectEmployee(e.target.value)}><option value="">{t.chooseName}</option>{staff.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>Código de autorización del encargado<input type="password" autoComplete="off" value={correctionCode} onChange={e=>setCorrectionCode(e.target.value)}/></label><label>{t.reason}<textarea value={reason} maxLength={500} onChange={e=>setReason(e.target.value)} placeholder={t.reasonHint}/></label><div className="ux-bottom"><button className="ux-secondary" onClick={()=>setCorrection(null)}>{t.cancel}</button><button className="ux-main-button" disabled={busy||reason.trim().length<5||!correctEmployee||!correctionCode} onClick={()=>void submitCorrection()}>{t.saveChange}</button></div></section></div>}
+ {correction&&<div className="ux-overlay ux-correction-overlay" role="presentation">
+  <section className="ux-modal ux-correction-modal" role="dialog" aria-modal="true" aria-label={t.correct}>
+   <header className="ux-modal-head ux-correction-head">
+    <div><p className="ux-eyebrow">{lang==='es'?'CONTROL DE INVENTARIO':'INVENTORY CONTROL'}</p><h2>{correction.type==='count'?(lang==='es'?'Corregir conteo':'Correct count'):t.correct}</h2></div>
+    <button type="button" className="ux-secondary ux-correction-close" onClick={()=>setCorrection(null)} aria-label={lang==='es'?'Cerrar corrección':'Close correction'}>×</button>
+   </header>
+   <div className="ux-correction-body">
+    <p className="ux-muted ux-correction-help">{t.reviewCorrection}</p>
+    {correction.type==='count'&&data.counts.filter(c=>c.id===correction.id).map(c=><div className="ux-correction-count" key={c.id}>
+     <div className="ux-correction-context"><strong>{c.operationalDate}</strong><span>{c.period==='opening'?t.opening:t.closing}</span><span>{locations.find(x=>x.id===c.siteId)?.name??c.siteId}</span></div>
+     <div className="ux-correction-list">
+      {c.lines.map(l=><div className="ux-correction-item" key={l.productId}>
+       <div className="ux-correction-item-heading"><strong>{l.productName}</strong><small>{l.bagSizeSnapshot??l.bagWeightKgSnapshot} {packUnitLabel(l.bagUnitSnapshot??'kg')}/{t.bags}</small></div>
+       <div className="ux-correction-inputs">
+        <label>{lang==='es'?'Bolsas completas':'Full bags'}<input type="number" min="0" step="1" inputMode="numeric" value={correctionLines[l.productId]??l.bagCount} onChange={e=>setCorrectionLines(v=>({...v,[l.productId]:Math.max(0,Math.floor(Number(e.target.value)||0))}))}/></label>
+        <label>{lang==='es'?'Bolsa abierta':'Open bag'} ({packUnitLabel(l.bagUnitSnapshot??'kg')})<input type="number" min="0" step="0.1" inputMode="decimal" value={correctionOpen[l.productId]??String(l.openAmount??l.openKg??0)} onChange={e=>setCorrectionOpen(v=>({...v,[l.productId]:e.target.value}))}/></label>
+       </div>
+      </div>)}
+     </div>
+    </div>)}
+    {correction.type!=='count'&&<div className="ux-correction-fields">
+     <label>{correction.type==='output'?t.produced:t.amount}<input type="number" min={correction.type==='output'?'0':'0.001'} step={correction.type==='output'?'1':'any'} value={correctQty} onChange={e=>setCorrectQty(e.target.value)}/></label>
+     {correction.type==='output'&&<label>{lang==='es'?'Contenido adicional de bolsa':'Additional bag contents'}<input type="number" min="0" step="0.1" value={correctPartial} onChange={e=>setCorrectPartial(e.target.value)}/></label>}
+     {correction.type==='input'&&<label>{t.unit}<select value={correctUnit} onChange={e=>setCorrectUnit(e.target.value)}>{PC_UNITS.map(u=><option key={u.id} value={u.id}>{lang==='es'?u.es:u.en}</option>)}</select></label>}
+    </div>}
+    <div className="ux-correction-meta">
+     <h3>{lang==='es'?'Autorización de la corrección':'Correction authorization'}</h3>
+     <div className="ux-correction-auth-fields">
+      <label>{t.corrector}<select value={correctEmployee} onChange={e=>setCorrectEmployee(e.target.value)}><option value="">{t.chooseName}</option>{staff.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+      <label>{lang==='es'?'Código del encargado':'Manager code'}<input type="password" autoComplete="off" value={correctionCode} onChange={e=>setCorrectionCode(e.target.value)}/></label>
+     </div>
+     <label>{t.reason}<textarea rows={3} value={reason} maxLength={500} onChange={e=>setReason(e.target.value)} placeholder={t.reasonHint}/></label>
+    </div>
+   </div>
+   <footer className="ux-bottom ux-correction-footer">
+    <button type="button" className="ux-secondary" onClick={()=>setCorrection(null)}>{t.cancel}</button>
+    <button type="button" className="ux-main-button" disabled={busy||reason.trim().length<5||!correctEmployee||!correctionCode} onClick={()=>void submitCorrection()}>{busy?(lang==='es'?'Guardando…':'Saving…'):t.saveChange}</button>
+   </footer>
+  </section>
+ </div>}
  </div>;
 }
