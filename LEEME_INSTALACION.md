@@ -1,62 +1,96 @@
-# Production Control — Reemplazos completos · 14/oct/2026
+# Production Control — Preparaciones intermedias no contabilizables
 
-Paquete preparado directamente desde `production-control copy(6).zip`. Conserva Next.js, Firebase, colecciones e IDs de registros existentes. **No es una versión probada contra la base Firestore real.** Primero probar en una rama y staging.
+**Fuente:** `production-control copy(9).zip`, adjuntado el 4 de noviembre de 2026. Este paquete **no** se obtuvo de una lectura en vivo de `main` en GitHub.
 
-## Qué cambia
+## Objetivo
 
-1. **Salidas especiales:** opción adicional «Windsor». Se registra como salida del origen; **no crea una recepción automática** en Windsor.
-2. **Presentaciones:** productos terminados con `bagSize` + `bagUnit` (kg, g, lb, L, mL, piezas y porciones). Ejemplo: bolsa de 10 porciones: se cuentan 10 bolsas, y se conocen 100 porciones. Los productos previos sin esos campos siguen usando `bagWeightKg` en kg. Las unidades físicas incompatibles **no se suman entre sí**.
-3. **Consulta operativa:** nueva ruta `/consulta`, visible para usuarios de Firebase Authentication con `portal_users/{uid}` activo, `role: "viewer"` o `role: "admin"`. Muestra gráfica de bolsas por día, conteos, producción, ingredientes y salidas; no usa el endpoint de KPIs. El usuario `viewer` **no tiene acceso** a los endpoints de Management. La consulta se hace por periodo y sucursal.
-4. **Alta de productos:** permite una medida diferente de kg por bolsa y conserva la conversión opcional a kilogramos solo para presentaciones de masa. Los cálculos gerenciales **en kg** no representan porciones/piezas/litros; deben analizarse por unidad, no tratarse como cero kg de consumo real.
-5. **Producción:** campo «Fecha de producción» independiente de «Fecha del conteo».
-6. **Ingrediente:** el desplegable se cierra al seleccionar, al perder enfoque y al registrar.
-7. **Cierre de producción:** «Finalizar preparación» está disponible tanto en «Por producto» como en «Por persona»; registra bolsas terminadas y contenido extra en la unidad de producto. Requiere cronómetros pausados y un resultado positivo. Conserva snapshot de presentación en lotes nuevos.
-8. **Finalización única:** los lotes finalizados no muestran botón de finalizar y el backend bloquea un segundo cierre, usando transacción. Para cambiar el resultado terminado hay una corrección autorizada.
-9. **Producción por fecha:** las abiertas se muestran de forma independiente (incluidas pendientes anteriores) y las finalizadas se agrupan por día y se despliegan solo al pedirlo.
-10. **Conteos por fecha:** filas compactas apertura/cierre; «Sin registrar» para los días sin datos del periodo. Al registrar tarde se conserva fecha operativa, responsables y timestamp del servidor (`capturedAt`). No se crean registros falsos de «sin conteo».
-11. **Consultas limitadas:** cocina carga por defecto solo el día actual; para buscar un rango se seleccionan fechas **antes de pedir los datos**. Máximo 91 días inclusivos. Firestore aplica filtros por `operationalDate` antes de descargar, incluidos ingredientes, movimientos y actividades. Los lotes aún abiertos se recuperan aparte. Management usa un periodo inicial de 30 días y el endpoint rechaza consultas mayores de 91 días.
-12. **Correcciones:** sin firmas, con código de verificación del encargado, motivo, nombre de operador y revisiones anteriores en Firestore. Se aplica a conteo, insumos, producción final y cronómetros. **Nunca se pide este código para contar, preparar, registrar ingredientes o usar cronómetros normalmente**.
+Permitir **producir MARINADO, registrar tiempo de elaboración, documentar cantidad obtenida y usar ese MARINADO como ingrediente de CARNITAS** sin exigir inventario físico de MARINADO en apertura y cierre.
 
-## Configuración antes de desplegar
+## Regla funcional
 
-1. Guarda una copia del repositorio actual y un respaldo de Firestore. Prueba primero con datos no productivos.
-2. Reemplaza los archivos manteniendo las rutas exactas indicadas en `ARCHIVOS_MODIFICADOS.txt`. Los archivos existentes no incluidos no se sustituyen.
-3. En **Vercel → Production Control → Settings → Environment Variables** agrega `PC_CORRECTION_CODE` como **Secret** con un valor resistente a intentos de adivinación (recomendado 12+ caracteres). Añade el mismo valor a `.env.local` para pruebas locales (no publicar ni versionar el secreto). Redeploy después de cambiarlo.
-4. **NO** configures `PC_OPERATIONS_PIN`: ya no se utiliza; ni conteos ni producción requieren códigos.
-5. Para habilitar un usuario de consulta, crea su cuenta en **Firebase Authentication** y agrega/actualiza el documento `portal_users/{firebaseAuthUid}` con `active: true`, `role: "viewer"`. Hazlo con permisos administrativos. El superadmin mantiene su control actual con `role: "admin"` **y la lista de correos autorizados**. No se agregan cuentas automáticamente ni contraseñas al repositorio.
-6. No cambies indiscriminadamente las reglas de Firestore de otras aplicaciones. Las rutas del servidor usan Firebase Admin SDK, así que las reglas de cliente no suplen la autorización del servidor.
-7. Ejecuta en tu equipo: `npm ci`, `npm run lint`, `npm run build`; después valida en staging con un usuario de cocina y otro `viewer`. Realiza un despliegue sólo al aprobar las pruebas.
+- Para productos de tipo `finished` existe `countable` (booleano). **Ausente equivale a `true`** para preservar el comportamiento de todos los productos existentes.
+- `countable=true`: mantiene conteo físico, presentación y pronóstico de inventario.
+- `countable=false`: mantiene producción, procedimiento y cronómetro. Finaliza el lote capturando **cantidad producida** con su unidad (`kg`, `L`, etc.), sin registrar bolsas físicas. Aparece en la búsqueda de ingredientes de otros lotes.
+- `active` **no** equivale a `countable`. Una preparación no contabilizable sigue activa y utilizable.
+- Los insumos simples (`ingredient`) se siguen usando como antes y **no aparecen** en conteos físicos por este cambio.
+- Se prohíbe registrar un producto como ingrediente de su propio lote. Un registro de ingredientes es manual: no provoca decrementos de existencias automáticos.
+- Los conteos físicos nuevos y salidas extraordinarias solo admiten `finished` contabilizables. Los conteos históricos y sus revisiones siguen consultables/corregibles.
+- `pc_batches.countableSnapshot` preserva el modo usado al crear el lote. Los lotes iniciados antes de desactivar el switch siguen con su comportamiento anterior.
+- En lotes no contabilizables, `bagCount=0`, `partialAmount=0`, y el resultado real se mantiene en `outputAmount` / `outputUnit`. Los reportes de producción e insumos retienen estos registros.
+- `01_Existencias` excluye productos no contabilizables, pero `04_Producción`, `07_Ingredientes` y los hechos de exportación conservan producción e ingredientes. La estructura de `dim_productos.csv` se mantiene igual para no alterar integraciones.
 
-## Límites explícitos de seguridad
+## Archivos incluidos
 
-- La captura de cocina **es anónima** a nivel de inicio de sesión; el nombre seleccionado sirve para atribución operativa, **no es una identidad autenticada**.
-- El endpoint básico `/api/pc/snapshot` es accesible al personal sin cuenta, porque la cocina debe consultar el inventario actual e históricos seleccionados sin login. Por lo tanto, **la información operativa que puede leer cocina no es confidencial a nivel de API**. `/consulta` exige cuenta para dar una experiencia de supervisión; para que toda la historia operativa sea privada será necesario separar en el futuro el subconjunto público de cocina del API de supervisión.
-- La protección de **KPIs gerenciales** sí se aplica en servidor con Firebase Auth, allowlist de superadministradores y rol `admin`.
-- Correcciones requieren `PC_CORRECTION_CODE` validado en servidor; si falta, el endpoint devuelve error 503 y **no permite corregir**. Los registros normales siguen operando.
-- Por ahora no hay límite de intentos de código de corrección; se recomienda un secreto robusto, HTTPS y protección WAF/rate limiting desde Vercel.
+1. `src/app/page.tsx`: toggle, conteos, entrada de preparaciones como ingredientes, captura directa y corrección de producción no contabilizable.
+2. `src/app/pc.css`: presentación del toggle.
+3. `src/app/api/pc/[action]/route.ts`: persistencia y validación de `countable`, producción e insumos, protección de conteo físico.
+4. `src/lib/pc-units.ts`: permite también porciones como unidad de ingrediente intermedio.
+5. `src/lib/pc-kpis-server.ts`: excluye no contabilizables del catálogo de pronóstico de inventario.
+6. `src/lib/pc-reports-server.ts`: bloquea pronósticos directos de productos no contabilizables.
+7. `src/lib/pc-operational-report.ts`: evita filas no contabilizables en `01_Existencias`; preserva hechos de producción.
+8. `src/app/consulta/page.tsx` y `src/lib/pc-consulta-chart.ts`: distinguen la producción sin conteo físico en Consulta Operativa y evitan mostrar bolsas inexistentes.
+9. `tests/pc-intermediate-preparation.test.cjs`: pruebas aisladas de la API y reportes con Firestore en memoria; **no escriben datos reales**.
 
-## Compatibilidad y alcance
+## Instalación segura (PowerShell)
 
-- Se conservan registros previos y formatos antiguos `bagWeightKg`, `openKg`, `partialKg`, `outputKg` para cantidades de masa; las unidades nuevas utilizan `bagSize`, `bagUnit`, `openAmount`, `partialAmount` y `outputAmount`.
-- Los informes/KPIs heredados que se expresan en kg **no calculan rendimiento de porciones ni litros**. Los datos de ingredientes registrados siguen en sus unidades nativas. No se inventa un rendimiento numérico sumando agua, masa y piezas.
-- En consultas gerenciales y reportes por periodo, actividades/ingredientes **legacy sin campo `operationalDate`** pueden no aparecer hasta que se les añada ese campo con una migración verificada. Las consultas de lotes actuales sí utilizan los datos registrados con fecha.
-- Cualquier lote activo muy antiguo permanece en «En curso» hasta que sea finalizado/corregido; el backend limita a 60 lotes pendientes fuera del periodo. Si existe más carga acumulada que esa, conviene cerrar los lotes legítimamente y hacer limpieza supervisada.
-- La finalización se bloquea si un cronómetro aún corre. El aviso en la pantalla indica qué persona debe pausarlo; «Terminar mi tiempo» y «Finalizar preparación» son acciones distintas.
-- Firestore requiere índices automáticos de campos simples `operationalDate`, `status` y `batchId` (configuración predeterminada). No se añadieron consultas de múltiples campos que requieran índices compuestos.
+Abre PowerShell **en la raíz de `production-control`**. Antes de sobrescribir nada, comprueba que tu copia local coincide con el ZIP fuente:
 
-## Pruebas mínimas antes del despliegue
+```powershell
+$paquete = 'C:\RUTA\AL\PAQUETE\Production_Control_Preparaciones_Intermedias_No_Contabilizables'
+& "$paquete\PRECHECK_BASELINE.ps1" -RepoPath (Get-Location).Path
+```
 
-1. Crear producto de 1 kg, otro de 5 lb, otro de bolsa con 10 porciones; guardar, editar y reabrir.
-2. Contar apertura/cierre por separado; verificar bolsas y subtotal por unidad sin mezclas.
-3. Registrar movimiento Windsor, comprobar sitio origen y cantidades.
-4. Crear lote, agregar ingrediente, iniciar cronómetro, intentar finalizar (debe advertir), pausar y finalizar en ambas vistas. Confirmar que no permite finalizar dos veces y que guarda cantidad final.
-5. Corregir una captura sin código y con código incorrecto (rechazo); con código correcto (revisión registrada).
-6. Buscar varios días sin registros: las fechas vacías deben aparecer; registrar posteriormente y comprobar quién capturó y `capturedAt` real del servidor.
-7. Comprobar que `/consulta` requiere usuario `viewer`/`admin`, que un `viewer` recibe 403 al solicitar Management, y que el superadmin sigue viendo KPIs.
-8. Revisar periodos y que ni `snapshot`, ni Management ni los reportes consulten las colecciones operativas completas, salvo catálogos y los lotes pendientes.
+**Si el resultado indica `DIFIERE`, detente.** Puede haber cambios más recientes que este paquete no incluye. No sobreescribas un repositorio con cambios locales ni lo fuerces.
 
-## Verificación ejecutada en este entorno
+Si la baseline coincide, revisa `git status --short` y usa una copia de seguridad o una rama temporal antes de copiar los nueve archivos. Para hacer copia de seguridad sin contaminar el repo:
 
-- Inspección de código y validación **sintáctica** de los archivos TypeScript/TSX con el compilador global de TypeScript.
-- Pruebas locales de conversiones y cantidades del módulo independiente de presentaciones.
-- **No** se pudo completar `npm ci` por restricciones de acceso al registro de paquetes; por tanto **no se ha ejecutado `npm run build` ni pruebas contra Firebase/Vercel**. La revisión sintáctica no sustituye a la compilación ni pruebas de integración.
+```powershell
+$backup = Join-Path $env:TEMP ('production-control-backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+New-Item -ItemType Directory -Path $backup -Force | Out-Null
+$reemplazos = Import-Csv "$paquete\MANIFEST_BASELINE_SHA256.csv"
+foreach ($item in $reemplazos) {
+  $destino = Join-Path (Get-Location).Path $item.Path
+  $origen = Join-Path $paquete $item.Path
+  $respaldo = Join-Path $backup $item.Path
+  New-Item -ItemType Directory -Force -Path (Split-Path $respaldo) | Out-Null
+  Copy-Item -LiteralPath $destino -Destination $respaldo -Force
+  Copy-Item -LiteralPath $origen -Destination $destino -Force
+}
+New-Item -ItemType Directory -Force -Path 'tests' | Out-Null
+Copy-Item -LiteralPath "$paquete\tests\pc-intermediate-preparation.test.cjs" -Destination 'tests\pc-intermediate-preparation.test.cjs' -Force
+Write-Host "Copia de seguridad: $backup"
+```
+
+Luego valida **antes de hacer commit**:
+
+```powershell
+node --test tests/pc-intermediate-preparation.test.cjs
+if ($LASTEXITCODE -ne 0) { throw 'Fallo en prueba de preparaciones intermedias' }
+npm run lint
+if ($LASTEXITCODE -ne 0) { throw 'Fallo ESLint' }
+npm run build
+if ($LASTEXITCODE -ne 0) { throw 'Fallo compilacion Next.js' }
+git diff --check
+if ($LASTEXITCODE -ne 0) { throw 'Fallo git diff --check' }
+git status --short
+```
+
+No modificar `.env.local`, Firestore Rules ni migrar datos para esta funcionalidad.
+
+## Prueba manual mínima antes de publicar
+
+1. **Catálogo:** edita MARINADO como **producto de producción**, activa `Activo` y desactiva **Incluir en conteos físicos**. Selecciona litros como unidad y registra el procedimiento.
+2. **Producción:** crea una preparación MARINADO, registra el cronómetro y finaliza capturando, por ejemplo, **3.5 L**. Debe constar como cantidad terminada, sin requerir bolsas.
+3. **Carnitas:** inicia un lote de CARNITAS, busca MARINADO en Ingredientes y registra 2.5 L. Debe quedar en `pc_inputs` asociado a CARNITAS. No descuenta automáticamente los litros producidos.
+4. **Conteo:** captura apertura/cierre. Debe aparecer CARNITAS (si está marcado contabilizable) y **no MARINADO**.
+5. **Corrección:** confirma que un lote MARINADO se puede corregir por cantidad producida y que los conteos anteriores siguen accesibles.
+6. **Exportación:** `01_Existencias` excluye MARINADO, pero `04_Producción` y `07_Ingredientes` muestran registros correspondientes.
+7. **Retrocompatibilidad:** un producto sin campo `countable` debe seguir apareciendo en conteos.
+8. **Importante:** un lote ya iniciado toma su modalidad al momento de crearlo; finalízalo antes de cambiar su esquema operativo.
+
+## Validación realizada al construir el paquete
+
+- Parse sintáctico con TypeScript de 43 archivos TS/TSX: **PASS**.
+- CSS analizado con `tinycss2`: **sin errores de sintaxis de nivel superior**.
+- `node --test` de flujos de producción, ingrediente, conteo, corrección y exportación con base de datos en memoria: **2 PASS**.
+- `npm ci` no pudo completarse por dependencias npm no disponibles en este entorno. **No se ejecutaron `npm run lint` ni `npm run build` aquí**; son necesarios en la computadora local antes de hacer push.

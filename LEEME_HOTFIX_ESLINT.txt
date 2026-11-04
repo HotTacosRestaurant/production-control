@@ -1,0 +1,17 @@
+HOTFIX ESLINT — PRUEBAS DE PREPARACIONES INTERMEDIAS
+
+Sustituir SOLO tests/pc-intermediate-preparation.test.cjs en el repositorio.
+No modifica aplicación, backend, Firebase ni datos.
+
+Cambio: deshabilita la regla @typescript-eslint/no-require-imports
+únicamente alrededor de los 6 imports CommonJS del archivo .cjs,
+con reactivación inmediata tras los imports.
+
+Validar:
+node --test tests/pc-intermediate-preparation.test.cjs
+npm run lint
+npm run build
+git diff --check
+git status
+
+Si todo pasa, verificar qué archivos están en staging y hacer commit/push.
