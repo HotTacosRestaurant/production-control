@@ -116,6 +116,9 @@ export async function POST(req:NextRequest,context:Context){try{
    if(!['finished','ingredient'].includes(String(productKind))||(productKind==='finished'&&(!isPackUnit(bagUnit)||!Number.isFinite(size)||size<=0||size>100000)))throw new Error('INVALID_PRODUCT');
    const id=typeof payload.id==='string'&&/^[\w-]{5,80}$/.test(payload.id)?payload.id:newId();
    const process=payload.preparationProcess;
+   // Legacy finished products are inventory-counted unless explicitly disabled.
+   if(productKind==='finished'&&payload.countable!==undefined&&typeof payload.countable!=='boolean')throw new Error('INVALID_CATALOG');
+   const countable=productKind==='finished'?payload.countable!==false:false;
    // Do not ask kitchen staff to configure a primary ingredient or product category.
    // Preserve pre-existing values on edit for historical batch compatibility.
    const previous=existingId?(await store.collection('pc_products').doc(id).get()).data():undefined;
@@ -126,7 +129,7 @@ export async function POST(req:NextRequest,context:Context){try{
       !Number.isInteger(minDays)||minDays<0||minDays>=targetDays
    ))throw new Error('INVALID_PLANNING_CONFIG');
    const processVersion=productKind==='finished'?((Number(previous?.processVersion)||0)+(previous?.preparationProcess===process?0:1)):undefined;
-   await store.collection('pc_products').doc(id).set({name:productKind==='ingredient'?name.toLocaleUpperCase('es-CA'):name,kind:productKind,category:text(previous?.category,40)||'other',defaultUnit,bagWeightKg:productKind==='finished'?weight:null,bagSize:productKind==='finished'?size:null,bagUnit:productKind==='finished'?bagUnit:null,siteIds:sites,active,
+   await store.collection('pc_products').doc(id).set({name:productKind==='ingredient'?name.toLocaleUpperCase('es-CA'):name,kind:productKind,category:text(previous?.category,40)||'other',defaultUnit,bagWeightKg:productKind==='finished'?weight:null,bagSize:productKind==='finished'?size:null,bagUnit:productKind==='finished'?bagUnit:null,siteIds:sites,active,countable,
     ...(productKind==='finished'?{targetDays,minDays,preparationProcess:process??'',processVersion,...(existingId?{leadDays:FieldValue.delete(),supplierLeadDays:FieldValue.delete(),wholeUnitRawKg:FieldValue.delete(),expectedYieldPct:FieldValue.delete()}: {})}:{}),updatedAt:stamp()},{merge:true});
    return NextResponse.json({ok:true,id});
   }
@@ -137,7 +140,7 @@ export async function POST(req:NextRequest,context:Context){try{
   if(!safeSite(site)||!validDate(date)||date>operationalToday()||!['foodtruck','windsor','catering','waste','adjustment'].includes(String(kind))||!Number.isFinite(quantity)||quantity<=0||quantity>100000)throw new Error('INVALID_MOVEMENT');
   const employee=await findEmployee(payload.employeeId,site);
   const psnap=await store.collection('pc_products').doc(productId).get(),pr=psnap.data();
-  if(!pr||pr.kind!=='finished'||!validSites(pr.siteIds)||!pr.siteIds.includes(site))throw new Error('INVALID_PRODUCT');
+  if(!pr||pr.kind!=='finished'||pr.countable===false||!validSites(pr.siteIds)||!pr.siteIds.includes(site))throw new Error('INVALID_PRODUCT');
   const pack=presentation(pr);const unit=payload.unit??pack.bagUnit;
   if(!isPackUnit(unit)||unit!==pack.bagUnit)throw new Error('INVALID_UNIT');
   const quantityKg=asKg(quantity,unit);
@@ -166,7 +169,7 @@ export async function POST(req:NextRequest,context:Context){try{
   for(let index=0;index<rows.length;index++){
    const row=rows[index];
    const doc=productDocs[index];const p=doc.data();
-   if(!p||p.kind!=='finished'||!p.active||!validSites(p.siteIds)||!p.siteIds.includes(site))throw new Error('INVALID_PRODUCT');
+   if(!p||p.kind!=='finished'||p.countable===false||!p.active||!validSites(p.siteIds)||!p.siteIds.includes(site))throw new Error('INVALID_PRODUCT');
    const pack=presentation(p);
    if(!Number.isFinite(pack.bagSize)||pack.bagSize<=0)throw new Error('INVALID_PRODUCT');
    const openAmount=validPartial(row.openAmount??row.openKg,pack.bagSize);
@@ -239,14 +242,20 @@ export async function POST(req:NextRequest,context:Context){try{
  }
  if(action==='output-correct'){
   requireCorrectionCode(payload.verificationCode);
-  const id=text(payload.batchId,100),reason=text(payload.reason,500),bags=number(payload.bagCount);
-  if(!id||reason.length<5||!Number.isSafeInteger(bags)||bags<0||bags>100000)throw new Error('INVALID_CORRECTION');
+  const id=text(payload.batchId,100),reason=text(payload.reason,500);
+  if(!id||reason.length<5)throw new Error('INVALID_CORRECTION');
   const ref=store.collection('pc_batches').doc(id),before=await ref.get(),old=before.data();
   if(!old||old.status!=='completed'||!safeSite(old.siteId))throw new Error('INVALID_BATCH');
   const employee=await findEmployee(payload.employeeId,old.siteId);
   const pack=presentation({bagSize:old.bagSizeSnapshot,bagUnit:old.bagUnitSnapshot,bagWeightKg:old.bagWeightKgSnapshot});
-  const partialAmount=validPartial(payload.partialAmount??payload.partialKg,pack.bagSize);
-  const outputAmount=productQuantity(bags,partialAmount,pack.bagSize),outputKg=asKg(outputAmount,pack.bagUnit),partialKg=asKg(partialAmount,pack.bagUnit);
+  if(pack.bagSize<=0)throw new Error('INVALID_CORRECTION');
+  const direct=old.countableSnapshot===false;
+  const directAmount=number(payload.outputAmount);
+  if(direct&&(!Number.isFinite(directAmount)||directAmount<=0||directAmount>100000||Math.round(directAmount*1000)/1000!==directAmount))throw new Error('INVALID_CORRECTION');
+  const bags=direct?0:number(payload.bagCount);
+  if(!Number.isSafeInteger(bags)||bags<0||bags>100000)throw new Error('INVALID_CORRECTION');
+  const partialAmount=direct?0:validPartial(payload.partialAmount??payload.partialKg,pack.bagSize);
+  const outputAmount=direct?directAmount:productQuantity(bags,partialAmount,pack.bagSize),outputKg=asKg(outputAmount,pack.bagUnit),partialKg=asKg(partialAmount,pack.bagUnit);
   if(outputAmount<=0)throw new Error('INVALID_OUTPUT');
   if(outputAmount===(old.outputAmount??old.outputKg)&&bags===old.bagCount)throw new Error('NO_CHANGES');
   const revision=ref.collection('revisions').doc();
@@ -254,7 +263,7 @@ export async function POST(req:NextRequest,context:Context){try{
    const latest=await tx.get(ref);
    if(!latest.exists||latest.updateTime?.toMillis()!==before.updateTime?.toMillis())throw new Error('CONFLICT');
    tx.create(revision,{before:{bagCount:old.bagCount,partialAmount:old.partialAmount??old.partialKg??0,outputAmount:old.outputAmount??old.outputKg},after:{bagCount:bags,partialAmount,outputAmount},reason,correctedById:employee.id,correctedByName:employee.name,createdAt:stamp()});
-   tx.update(ref,{bagCount:bags,partialAmount,outputAmount,outputUnit:pack.bagUnit,partialKg,outputKg,equivalentBags:outputAmount/pack.bagSize,updatedAt:stamp(),correctedAt:stamp(),correctedById:employee.id,correctedByName:employee.name,correctionCount:FieldValue.increment(1)});
+   tx.update(ref,{bagCount:bags,partialAmount,outputAmount,outputUnit:pack.bagUnit,partialKg,outputKg,equivalentBags:direct?0:outputAmount/pack.bagSize,updatedAt:stamp(),correctedAt:stamp(),correctedById:employee.id,correctedByName:employee.name,correctionCount:FieldValue.increment(1)});
   });
   await audit('output.correct',old.siteId,employee,{batchId:id,revisionId:revision.id,reason});
   return NextResponse.json({ok:true});
@@ -268,7 +277,7 @@ export async function POST(req:NextRequest,context:Context){try{
   const product=await store.collection('pc_products').doc(productId).get();const p=product.data();
   if(!p||!p.active||p.kind!=='finished'||!validSites(p.siteIds)||!p.siteIds.includes(site))throw new Error('INVALID_PRODUCT');
   const id=newId();
-  await store.collection('pc_batches').doc(id).create({siteId:site,productId,productName:p.name,operationalDate:date,status:'active',bagSizeSnapshot:presentation(p).bagSize,bagUnitSnapshot:presentation(p).bagUnit,bagWeightKgSnapshot:presentation(p).bagWeightKg,processSnapshot:p.preparationProcess??'',processVersionSnapshot:p.processVersion??1,createdById:employee.id,createdByName:employee.name,createdAt:stamp(),updatedAt:stamp()});
+  await store.collection('pc_batches').doc(id).create({siteId:site,productId,productName:p.name,operationalDate:date,status:'active',countableSnapshot:p.countable!==false,bagSizeSnapshot:presentation(p).bagSize,bagUnitSnapshot:presentation(p).bagUnit,bagWeightKgSnapshot:presentation(p).bagWeightKg,processSnapshot:p.preparationProcess??'',processVersionSnapshot:p.processVersion??1,createdById:employee.id,createdByName:employee.name,createdAt:stamp(),updatedAt:stamp()});
   await audit('batch.create',site,employee,{batchId:id});
   return NextResponse.json({ok:true,id});
  }
@@ -339,20 +348,27 @@ export async function POST(req:NextRequest,context:Context){try{
    const ingredientId=text(payload.ingredientId,80),quantity=number(payload.quantity),unit=payload.unit;
    if(!Number.isFinite(quantity)||quantity<=0||quantity>100000||!isPCUnit(unit))throw new Error('INVALID_INPUT');
    const ingredient=await store.collection('pc_products').doc(ingredientId).get(),p=ingredient.data();
-   if(!p||p.kind!=='ingredient'||!p.active||!validSites(p.siteIds)||!p.siteIds.includes(site))throw new Error('INVALID_INGREDIENT');
+   // A produced, non-countable preparation (e.g. MARINADO) may be used in another batch.
+   // Do not allow adding the batch's own product as its input.
+   if(!p||!(p.kind==='ingredient'||(p.kind==='finished'&&p.countable===false))||ingredientId===b.productId||!p.active||!validSites(p.siteIds)||!p.siteIds.includes(site))throw new Error('INVALID_INGREDIENT');
    const id=newId();await store.collection('pc_inputs').doc(id).create({batchId,siteId:site,operationalDate:b.operationalDate,ingredientId,ingredientName:p.name,quantity,unit,employeeId:employee.id,employeeName:employee.name,createdAt:stamp(),updatedAt:stamp()});
    await audit('batch.input',site,employee,{batchId,id});return NextResponse.json({ok:true,id});
   }
   if(action==='finish'){
-   const bagCount=number(payload.bagCount);
    const pack=b.bagSizeSnapshot?presentation({bagSize:b.bagSizeSnapshot,bagUnit:b.bagUnitSnapshot,bagWeightKg:b.bagWeightKgSnapshot}):presentation((await store.collection('pc_products').doc(b.productId).get()).data()??{});
-   if(!Number.isSafeInteger(bagCount)||bagCount<0||bagCount>100000||pack.bagSize<=0)throw new Error('INVALID_OUTPUT');
-   const partialAmount=validPartial(payload.partialAmount??payload.partialKg,pack.bagSize);
-   const outputAmount=productQuantity(bagCount,partialAmount,pack.bagSize),outputKg=asKg(outputAmount,pack.bagUnit),partialKg=asKg(partialAmount,pack.bagUnit);
+   if(pack.bagSize<=0)throw new Error('INVALID_OUTPUT');
+   // Non-countable preparations are registered by direct produced quantity, never bags.
+   const direct=b.countableSnapshot===false;
+   const directAmount=number(payload.outputAmount);
+   if(direct&&(!Number.isFinite(directAmount)||directAmount<=0||directAmount>100000||Math.round(directAmount*1000)/1000!==directAmount))throw new Error('INVALID_OUTPUT');
+   const bagCount=direct?0:number(payload.bagCount);
+   if(!Number.isSafeInteger(bagCount)||bagCount<0||bagCount>100000)throw new Error('INVALID_OUTPUT');
+   const partialAmount=direct?0:validPartial(payload.partialAmount??payload.partialKg,pack.bagSize);
+   const outputAmount=direct?directAmount:productQuantity(bagCount,partialAmount,pack.bagSize),outputKg=asKg(outputAmount,pack.bagUnit),partialKg=asKg(partialAmount,pack.bagUnit);
    if(outputAmount<=0)throw new Error('INVALID_OUTPUT');
    const running=await store.collection('pc_activities').where('batchId','==',batchId).get();
    if(running.docs.some(doc=>doc.data().running===true))throw new Error('TIMERS_RUNNING');
-   await store.runTransaction(async tx=>{const fresh=await tx.get(ref);if(fresh.data()?.status!=='active')throw new Error('CONFLICT');tx.update(ref,{status:'completed',bagCount,partialKg,partialAmount,outputAmount,outputUnit:pack.bagUnit,bagSizeSnapshot:pack.bagSize,bagUnitSnapshot:pack.bagUnit,bagWeightKgSnapshot:pack.bagWeightKg,outputKg,equivalentBags:outputAmount/pack.bagSize,completedById:employee.id,completedByName:employee.name,completedAt:stamp(),updatedAt:stamp()});});
+   await store.runTransaction(async tx=>{const fresh=await tx.get(ref);if(fresh.data()?.status!=='active')throw new Error('CONFLICT');tx.update(ref,{status:'completed',bagCount,partialKg,partialAmount,outputAmount,outputUnit:pack.bagUnit,bagSizeSnapshot:pack.bagSize,bagUnitSnapshot:pack.bagUnit,bagWeightKgSnapshot:pack.bagWeightKg,outputKg,equivalentBags:direct?0:outputAmount/pack.bagSize,completedById:employee.id,completedByName:employee.name,completedAt:stamp(),updatedAt:stamp()});});
    await audit('batch.finish',site,employee,{batchId,bagCount,partialAmount,outputAmount,outputUnit:pack.bagUnit});return NextResponse.json({ok:true});
   }
  }

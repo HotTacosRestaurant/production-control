@@ -169,5 +169,5 @@ export async function buildManagementData(filter?:{from?:string;to?:string}):Pro
  }
  for(const siteId of SITES){const late=counts.filter(x=>x.siteId===siteId&&x.isLateEntry===true).length;if(late)alerts.push({kind:'late-entry',severity:'warning',siteId,title:'Capturas posteriores',detail:`${late} conteo(s) registrados después de la fecha operativa`});}
 
- return {generatedAt:new Date().toISOString(),productCatalog:docs(productSnap).filter(r=>r.active!==false&&Array.isArray(r.siteIds)).map(r=>({id:r.id,name:s(r.name)||r.id,siteIds:r.siteIds as Site[]})),summary:summaryFor(undefined,counts,batches,activities,inputs,estimatedBySite),bySite,byEmployee,byProduct,trend,alerts:alerts.slice(0,30)};
+ return {generatedAt:new Date().toISOString(),productCatalog:docs(productSnap).filter(r=>r.active!==false&&r.countable!==false&&Array.isArray(r.siteIds)).map(r=>({id:r.id,name:s(r.name)||r.id,siteIds:r.siteIds as Site[]})),summary:summaryFor(undefined,counts,batches,activities,inputs,estimatedBySite),bySite,byEmployee,byProduct,trend,alerts:alerts.slice(0,30)};
 }

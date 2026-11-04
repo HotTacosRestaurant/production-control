@@ -5,6 +5,7 @@ export const PC_UNITS = [
   { id: 'l', en: 'Liter (L)', es: 'Litro (L)' },
   { id: 'ml', en: 'Milliliter (mL)', es: 'Mililitro (mL)' },
   { id: 'unit', en: 'Piece (pc)', es: 'Pieza (pza)' },
+  { id: 'portion', en: 'Portion', es: 'Porción' },
 ] as const;
 export type PCUnit = (typeof PC_UNITS)[number]['id'];
 export const isPCUnit = (v: unknown): v is PCUnit =>

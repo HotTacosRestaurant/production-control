@@ -18,7 +18,7 @@ export async function loadReport(config:ScenarioConfig):Promise<ReportPayload>{
   store.collection('pc_movements').where('operationalDate','>=',from).where('operationalDate','<=',to).get(),
  ]);
  const pdata=products.data();
- if(!pdata||pdata.kind!=='finished'||!Array.isArray(pdata.siteIds)||!pdata.siteIds.includes(config.siteId))throw new Error('INVALID_PRODUCT');
+ if(!pdata||pdata.kind!=='finished'||pdata.countable===false||!Array.isArray(pdata.siteIds)||!pdata.siteIds.includes(config.siteId))throw new Error('INVALID_PRODUCT');
  const product:ProductConfig={id:products.id,name:String(pdata.name),bagWeightKg:n(pdata.bagWeightKg),targetDays:n(pdata.targetDays)||10,minDays:pdata.minDays===undefined?3:n(pdata.minDays)};
  // Firestore DocumentData is untyped; preserve the row's dynamic fields and an explicit ID.
  const convert=(s:FirebaseFirestore.QuerySnapshot):AnyRow[]=>s.docs.map(d=>({...d.data(),id:d.id} as AnyRow));

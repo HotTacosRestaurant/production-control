@@ -51,7 +51,8 @@ export function buildOperationalReport(source:ExportSource,cfg:ExportConfig):{sh
  const within=(date:unknown)=>typeof date==='string'&&date>=cfg.from&&date<=cfg.to;
  const byProduct=(id:unknown)=>!cfg.productId||id===cfg.productId;
  const products=source.products.filter(p=>Array.isArray(p.siteIds)&&p.siteIds.includes(cfg.site)&&(!cfg.productId||p.id===cfg.productId||p.kind==='ingredient'));
- const finished=products.filter(p=>p.kind==='finished');
+ // Non-countable intermediates remain in production/ingredient exports, never in physical stock.
+ const finished=products.filter(p=>p.kind==='finished'&&p.countable!==false);
  const productNames=new Map(source.products.map(p=>[p.id,txt(p.name)] as const));
  const staffNames=new Map(source.staff.map(s=>[s.id,txt(s.name)]));
  const counts=source.counts.filter(c=>c.siteId===cfg.site&&within(c.operationalDate)&&(!cfg.productId||(Array.isArray(c.lines)&&c.lines.some((l:unknown)=>!!l&&typeof l==='object'&&(l as Record<string,unknown>).productId===cfg.productId)))).sort((a,b)=>txt(a.operationalDate).localeCompare(txt(b.operationalDate))||txt(a.period).localeCompare(txt(b.period)));

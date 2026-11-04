@@ -1,10 +1,10 @@
 /** Read-only operational series by individual finished product. No Management KPI access. */
 import {packUnitLabel} from './pc-presentation';
 
-export type ViewProduct={id:string;name:string;kind?:string;bagWeightKg?:number|null;bagSize?:number;bagUnit?:string;targetDays?:number;minDays?:number};
+export type ViewProduct={id:string;name:string;kind?:string;countable?:boolean;bagWeightKg?:number|null;bagSize?:number;bagUnit?:string;targetDays?:number;minDays?:number};
 export type ViewCountLine={productId:string;productName?:string;bagCount?:number;openAmount?:number|null;openKg?:number|null;bagSizeSnapshot?:number;bagUnitSnapshot?:string;bagWeightKgSnapshot?:number|null;quantityUnit?:string;totalAmount?:number;totalKg?:number|null};
 export type ViewCount={id:string;operationalDate:string;period:string;lines:ViewCountLine[];startedByName?:string;signedByName?:string;isLateEntry?:boolean;capturedAt?:{_seconds?:number;seconds?:number}};
-export type ViewBatch={id:string;productId:string;operationalDate:string;productName:string;status:string;bagCount?:number;outputAmount?:number|null;outputKg?:number|null;outputUnit?:string;bagUnitSnapshot?:string;bagSizeSnapshot?:number;bagWeightKgSnapshot?:number|null;createdByName?:string};
+export type ViewBatch={id:string;productId:string;operationalDate:string;productName:string;status:string;bagCount?:number;countableSnapshot?:boolean;outputAmount?:number|null;outputKg?:number|null;outputUnit?:string;bagUnitSnapshot?:string;bagSizeSnapshot?:number;bagWeightKgSnapshot?:number|null;createdByName?:string};
 export type ViewMovement={id:string;productId:string;operationalDate:string;productName:string;movementKind:string;quantity?:number|null;unit?:string;quantityKg?:number|null};
 export type ViewDay={date:string;opening:number|null;closing:number|null;production:number;extraordinary:number;consumption:number|null;validConsumption:boolean;hasProduction:boolean};
 export type ViewProjection={date:string;closing:number;production:number;consumption:number};

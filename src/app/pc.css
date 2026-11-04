@@ -314,3 +314,9 @@
  .ux-app .ux-correction-item{padding:10px}
  .ux-app .ux-correction-footer{padding-left:10px;padding-right:10px}
 }
+
+/* Intermediate preparations: inventory control is independent of production. */
+.pc-inventory-toggle{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid var(--pc-border,#d6dedb);border-radius:12px;margin:12px 0;background:var(--pc-surface,#fff);cursor:pointer}
+.pc-inventory-toggle input[type=checkbox]{width:21px;height:21px;flex:0 0 auto;margin:1px 0 0;accent-color:#167453}
+.pc-inventory-toggle span{display:flex;flex-direction:column;gap:6px;min-width:0}
+.pc-inventory-toggle small{display:block;font-size:12px;line-height:1.45;font-weight:400}
